@@ -96,7 +96,7 @@ const processDictionaryFile = function processDictionaryFile(terminology, direct
 
           const docs = Object.keys(mem).map((v) => {
             const ancestors = getAncestorsAsArray(v, terminology);
-            return { _id: v, t: mem[v].t.join('|'), p: ancestors };
+            return { _id: v, t: mem[v].t.join('|'), a: ancestors, p: mem[v].p.join(',') };
           });
           Code.remove({}, (errRemove) => {
             if (errRemove) {
