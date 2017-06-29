@@ -4,8 +4,9 @@ const pino = require('pino')();
 const es = require('event-stream');
 const mongoose = require('mongoose');
 const jsonfile = require('jsonfile');
+const config = require('./config.js');
 
-mongoose.connect(process.env.GETSET_MONGO_URL);
+mongoose.connect(config.MONGO_URL);
 
 const TestCode = require('./model');
 
@@ -14,12 +15,8 @@ const mem = {};
 let todo = 0;
 let done = 0;
 
-const BIT_LENGTH = 6;
-const CACHED_FILE = `cache/1/bitLength${BIT_LENGTH}.json`;
-const OVERWRITE = false;
-
 const uploadToMongo = function uploadToMongo(docs) {
-  TestCode.remove({}, (errRemove) => {
+  TestCode.collection.drop((errRemove) => {
     if (errRemove) {
       pino.error(errRemove);
       pino.info('Cant remove from collection TestCode');
@@ -30,8 +27,17 @@ const uploadToMongo = function uploadToMongo(docs) {
         pino.error(errInsert);
         process.exit(1);
       } else {
-        pino.info('ALL INSERTED');
-        process.exit(0);
+        pino.info('ALL INSERTED.');
+        pino.info('Adding indexes..');
+        TestCode.ensureIndexes((err) => {
+          // need to call this to ensure the index gets added
+          if (err) {
+            pino.error(err);
+            process.exit(1);
+          }
+          pino.info('INDEXES ADDED');
+          process.exit(0);
+        });
       }
     });
   });
@@ -80,9 +86,11 @@ const processDictionaryFile = function processDictionaryFile(terminology, direct
             mem[v].t.forEach((vv) => {
               if (vv) {
                 for (let i = 0; i < vv.length - 2; i += 1) {
-                  const bit = vv.substr(i, BIT_LENGTH).toLowerCase();
-                  if (!nchar[bit]) nchar[bit] = {};
-                  nchar[bit][v] = true;
+                  if (vv[i] !== ' ') {
+                    const bit = vv.substr(i, config.BIT_LENGTH).toLowerCase();
+                    if (!nchar[bit]) nchar[bit] = {};
+                    nchar[bit][v] = true;
+                  }
                 }
               } else {
                 pino.info(v, mem[v]);
@@ -91,7 +99,7 @@ const processDictionaryFile = function processDictionaryFile(terminology, direct
           });
           const docs = Object.keys(nchar).map(v => ({ _id: v, c: Object.keys(nchar[v]) }));
           pino.info('Writing cached file..');
-          jsonfile.writeFileSync(CACHED_FILE, docs);
+          jsonfile.writeFileSync(config.CACHED_FILE, docs);
           pino.info('Done.');
           uploadToMongo(docs);
         }
@@ -118,11 +126,11 @@ const doItAll = function doItAll() {
   });
 };
 
-if (OVERWRITE) {
+if (config.OVERWRITE_FILE) {
   doItAll();
 } else {
   pino.info('Reading cached file..');
-  jsonfile.readFile(CACHED_FILE, (err, obj) => {
+  jsonfile.readFile(config.CACHED_FILE, (err, obj) => {
     if (err) {
       pino.info('Not found.');
       doItAll();

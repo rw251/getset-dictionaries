@@ -9,26 +9,12 @@ const findTerm = function findTerm(term, n) {
   return new Promise((resolve, reject) => {
    // console.time(`${term}`);
     const bit = term.substr(0, n).toLowerCase();
-    let match = { _id: bit };
+    let match = { c: bit };
     if (bit.length < n) {
       const reg = new RegExp(`^${bit}`);
-      match = { _id: { $regex: reg } };
+      match = { c: { $regex: reg } };
     }
-    TestCode.aggregate([
-      { $match: match },
-      { $unwind: '$c' },
-      {
-        $lookup:
-        {
-          from: 'codes',
-          localField: 'c',
-          foreignField: '_id',
-          as: 'cc',
-        },
-      },
-      { $unwind: '$cc' },
-      { $project: { _id: '$cc._id', t: '$cc.t', a: '$cc.a', p: '$cc.p' } },
-    ], (err, codes) => {
+    TestCode.find(match, { c: 0 }, (err, codes) => {
       if (err) reject(err);
       else {
         const rtn = codes.map((v) => {
@@ -67,43 +53,44 @@ bench.execute(doTest, 100).then((avg) => {
 /*
  *  BIT_LENGTH=4
  *  "ns" : "getset.testcodes",
-    "size" :            185MB,
-    "count" :           159102,
-    "avgObjSize" :      1217,
-    "storageSize" :     232MB,
-    "totalIndexSize" :  5MB,
+    "size" :            154MB,
+    "count" :           166122,
+    "avgObjSize" :      977,
+    "storageSize" :     167MB,
+    "totalIndexSize" :  252MB,
 
-    0.156
+    0.123s
  *
  *  BIT_LENGTH=5
  *  "ns" : "getset.testcodes",
-    "size" :            178MB,
-    "count" :           399881,
-    "avgObjSize" :      465,
+    "size" :            173MB,
+    "count" :           166122,
+    "avgObjSize" :      1093,
     "storageSize" :     232MB,
-    "totalIndexSize" :  13MB,
+    "totalIndexSize" :  262MB,
 
-    0.0863
+    0.0684s
  *
  *  BIT_LENGTH=6
  *  "ns" : "getset.testcodes",
-    "size" :            215MB,
-    "count" :           763497,
-    "avgObjSize" :      295,
+    "size" :            192MB,
+    "count" :           166122,
+    "avgObjSize" :      1212,
     "storageSize" :     232MB,
-    "totalIndexSize" :  26MB,
+    "totalIndexSize" :  265MB,
 
-    0.0566
+    0.0473s (localhost)
+    0.139s (mlab)
 
  *  BIT_LENGTH=7
  *  "ns" : "getset.testcodes",
-    "size" :            205MB,
-    "count" :           1031820,
-    "avgObjSize" :      208,
+    "size" :            206MB,
+    "count" :           166122,
+    "avgObjSize" :      1302,
     "storageSize" :     232MB,
-    "totalIndexSize" :  36MB,
+    "totalIndexSize" :  289MB,
 
-    0.0480
+    0.0380s
  *
  *
  *

@@ -3,6 +3,7 @@ const path = require('path');
 const pino = require('pino')();
 const es = require('event-stream');
 const mongoose = require('mongoose');
+const jsonfile = require('jsonfile');
 const config = require('./config.js');
 
 mongoose.connect(config.MONGO_URL);
@@ -53,6 +54,34 @@ const getAncestorsAsArray = function getAncestors(code, terminology) {
   return Object.keys(doCode(code, terminology));
 };
 
+const uploadToMongo = function uploadToMongo(docs) {
+  Code.collection.drop((errRemove) => {
+    if (errRemove) {
+      pino.error(errRemove);
+      pino.info('Cant remove from collection Code');
+      process.exit(1);
+    }
+    Code.collection.insert(docs, (errInsert) => {
+      if (errInsert) {
+        pino.error(errInsert);
+        process.exit(1);
+      } else {
+        pino.info('ALL INSERTED.');
+        pino.info('Adding indexes..');
+        Code.ensureIndexes((err) => {
+          // need to call this to ensure the index gets added
+          if (err) {
+            pino.error(err);
+            process.exit(1);
+          }
+          pino.info('INDEXES ADDED');
+          process.exit(0);
+        });
+      }
+    });
+  });
+};
+
 // For a given dictionary file load it and map to an object - mem
 // Then determine the ancestors for each code and upload the resulting objects to mongo
 const processDictionaryFile = function processDictionaryFile(terminology, directory, file) {
@@ -95,35 +124,31 @@ const processDictionaryFile = function processDictionaryFile(terminology, direct
         if (todo === done) {
           pino.info('ALL DONE');
 
-          const docs = Object.keys(mem).map((v) => {
-            const ancestors = getAncestorsAsArray(v, terminology);
-            return { _id: v, t: mem[v].t.join('|'), a: ancestors, p: mem[v].p.join(',') };
-          });
-          Code.collection.drop((errRemove) => {
-            if (errRemove) {
-              pino.error(errRemove);
-              pino.info('Cant remove from collection Code');
-              process.exit(1);
-            }
-            Code.collection.insert(docs, (errInsert) => {
-              if (errInsert) {
-                pino.error(errInsert);
-                process.exit(1);
-              } else {
-                pino.info('ALL INSERTED.');
-                pino.info('Adding indexes..');
-                Code.ensureIndexes((err) => {
-                  // need to call this to ensure the index gets added
-                  if (err) {
-                    pino.error(err);
-                    process.exit(1);
+          Object.keys(mem).forEach((v) => {
+            const nchar = {};
+            mem[v].t.forEach((vv) => {
+              if (vv) {
+                for (let i = 0; i < vv.length - 2; i += 1) {
+                  if (vv[i] !== ' ') {
+                    const bit = vv.substr(i, config.BIT_LENGTH).toLowerCase();
+                    if (!nchar[bit]) nchar[bit] = true;
                   }
-                  pino.info('INDEXES ADDED');
-                  process.exit(0);
-                });
+                }
+              } else {
+                pino.info(v, mem[v]);
               }
             });
+            mem[v].c = Object.keys(nchar);
           });
+
+          const docs = Object.keys(mem).map((v) => {
+            const ancestors = getAncestorsAsArray(v, terminology);
+            return { _id: v, t: mem[v].t.join('|'), a: ancestors, p: mem[v].p, c: mem[v].c };
+          });
+          pino.info('Writing cached file..');
+          jsonfile.writeFileSync(config.CACHED_FILE, docs);
+          pino.info('Done.');
+          uploadToMongo(docs);
         }
       })
       .on('error', e => pino.error(e)));
@@ -142,8 +167,24 @@ const processTerminology = function processTerminology(terminology) {
   }
 };
 
+const doItAll = function doItAll() {
+  terminologies.forEach((terminology) => {
+    processTerminology(terminology);
+  });
+};
 
-terminologies.forEach((terminology) => {
-  processTerminology(terminology);
-});
+if (config.OVERWRITE_FILE) {
+  doItAll();
+} else {
+  pino.info('Reading cached file..');
+  jsonfile.readFile(config.CACHED_FILE, (err, obj) => {
+    if (err) {
+      pino.info('Not found.');
+      doItAll();
+    } else {
+      pino.info('Done.');
+      uploadToMongo(obj);
+    }
+  });
+}
 
