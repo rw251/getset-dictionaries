@@ -18,6 +18,7 @@ let done = 0;
 // Determines if the code is the root code for that terminology
 const isRoot = function isRoot(code, terminology) {
   if (terminology === 'Readv2' && code === '.....00') return true;
+  else if (terminology === 'EMIS' && code === '.....') return true;
   else if (!code) return true;
   return false;
 };
@@ -28,25 +29,31 @@ const G = {};
 
 // Get all parents of code as properties of the G[code] object
 const doCode = function doCode(code, terminology) {
-  if (terminology === 'Readv2' && code.length === 5) code += '00';
-  if (!GDone[code]) {
-    if (isRoot(code, terminology)) {
-      GDone[code] = true;
-      return {};
-    }
-    G[code] = {};
-    mem[code].p.forEach((parent) => {
-      G[code][parent] = true;
-      if (!GDone[parent]) G[parent] = doCode(parent, terminology);
-      Object.keys(G[parent]).forEach((v) => {
-        G[code][v] = true;
-      });
+  try {
+    if (terminology === 'Readv2' && code.length === 5) code += '00';
+    if (!GDone[code]) {
+      if (isRoot(code, terminology)) {
+        GDone[code] = true;
+        return {};
+      }
+      G[code] = {};
+      mem[terminology][code].p.forEach((parent) => {
+        G[code][parent] = true;
+        if (!GDone[parent]) G[parent] = doCode(parent, terminology);
+        Object.keys(G[parent]).forEach((v) => {
+          G[code][v] = true;
+        });
 
-      GDone[parent] = true;
-    });
-    GDone[code] = true;
+        GDone[parent] = true;
+      });
+      GDone[code] = true;
+    }
+    return G[code];
+  } catch (e) {
+    pino.error(e);
+    pino.info(`Code: ${code}, Terminology: ${terminology}`);
+    throw (e);
   }
-  return G[code];
 };
 
 // Get all ancestors of a code (including if multiple inheritance) and return as an array
@@ -54,38 +61,49 @@ const getAncestorsAsArray = function getAncestors(code, terminology) {
   return Object.keys(doCode(code, terminology));
 };
 
-const uploadToMongo = function uploadToMongo(docs) {
+const isFirstQuery = true;
+
+const dropMongoCollection = function dropMongoCollection(callback) {
   Code.collection.drop((errRemove) => {
     if (errRemove) {
       pino.error(errRemove);
       pino.info('Cant remove from collection Code');
       process.exit(1);
     }
-    Code.collection.insert(docs, (errInsert) => {
-      if (errInsert) {
-        pino.error(errInsert);
-        process.exit(1);
-      } else {
-        pino.info('ALL INSERTED.');
-        pino.info('Adding indexes..');
-        Code.ensureIndexes((err) => {
-          // need to call this to ensure the index gets added
-          if (err) {
-            pino.error(err);
-            process.exit(1);
-          }
-          pino.info('INDEXES ADDED');
-          process.exit(0);
-        });
-      }
-    });
+    callback();
   });
+};
+
+const insertToMongo = function insertToMongo(docs, callback) {
+  Code.collection.insert(docs, (errInsert) => {
+    if (errInsert) {
+      pino.error(errInsert);
+      process.exit(1);
+    } else {
+      pino.info('ALL INSERTED.');
+      pino.info('Adding indexes..');
+      Code.ensureIndexes((err) => {
+          // need to call this to ensure the index gets added
+        if (err) {
+          pino.error(err);
+          process.exit(1);
+        }
+        pino.info('INDEXES ADDED');
+        callback();
+      });
+    }
+  });
+};
+
+const uploadToMongo = function uploadToMongo(docs, callback) {
+  insertToMongo(docs, callback);
 };
 
 // For a given dictionary file load it and map to an object - mem
 // Then determine the ancestors for each code and upload the resulting objects to mongo
 const processDictionaryFile = function processDictionaryFile(terminology, directory, file) {
   pino.info(`Processing ${file}`);
+  if (!mem[terminology]) mem[terminology] = {};
   if (file.indexOf('dict.txt') < 0) return;
 
   todo += 1;
@@ -99,15 +117,15 @@ const processDictionaryFile = function processDictionaryFile(terminology, direct
         function processLine() {
           // process line here and call s.resume() when rdy
           const bits = line.split('\t');
-          if (mem[bits[0]]) {
-            if (mem[bits[0]].t.indexOf(bits[1]) < 0) {
-              mem[bits[0]].t.push(bits[1]);
+          if (mem[terminology][bits[0]]) {
+            if (mem[terminology][bits[0]].t.indexOf(bits[1]) < 0) {
+              mem[terminology][bits[0]].t.push(bits[1]);
             }
-            if (mem[bits[0]].p.indexOf(bits[2]) < 0) {
-              mem[bits[0]].p.push(bits[2]);
+            if (mem[terminology][bits[0]].p.indexOf(bits[2]) < 0) {
+              mem[terminology][bits[0]].p.push(bits[2]);
             }
           } else {
-            mem[bits[0]] = {
+            mem[terminology][bits[0]] = {
               t: [bits[1]],
               p: [bits[2]],
             };
@@ -124,31 +142,36 @@ const processDictionaryFile = function processDictionaryFile(terminology, direct
         if (todo === done) {
           pino.info('ALL DONE');
 
-          Object.keys(mem).forEach((v) => {
-            const nchar = {};
-            mem[v].t.forEach((vv) => {
-              if (vv) {
-                for (let i = 0; i < vv.length - 2; i += 1) {
-                  if (vv[i] !== ' ') {
-                    const bit = vv.substr(i, config.BIT_LENGTH).toLowerCase();
-                    if (!nchar[bit]) nchar[bit] = true;
+          terminologies.forEach((term) => {
+            if (!mem[term]) return;
+            Object.keys(mem[term]).forEach((v) => {
+              const nchar = {};
+              mem[term][v].t.forEach((vv) => {
+                if (vv) {
+                  for (let i = 0; i < vv.length - 2; i += 1) {
+                    if (vv[i] !== ' ') {
+                      const bit = vv.substr(i, config.BIT_LENGTH).toLowerCase();
+                      if (!nchar[bit]) nchar[bit] = true;
+                    }
                   }
+                } else {
+                  pino.info(v, mem[term][v]);
                 }
-              } else {
-                pino.info(v, mem[v]);
-              }
+              });
+              mem[term][v].c = Object.keys(nchar);
             });
-            mem[v].c = Object.keys(nchar);
-          });
 
-          const docs = Object.keys(mem).map((v) => {
-            const ancestors = getAncestorsAsArray(v, terminology);
-            return { _id: v, t: mem[v].t.join('|'), a: ancestors, p: mem[v].p, c: mem[v].c };
+            const docs = Object.keys(mem[term]).map((v) => {
+              const ancestors = getAncestorsAsArray(v, term);
+              return { _id: v, t: mem[term][v].t.join('|'), a: ancestors, p: mem[term][v].p, c: mem[term][v].c };
+            });
+            pino.info('Writing cached file..');
+            jsonfile.writeFileSync(path.join(config.CACHED_DIR, term, config.CACHED_FILE), docs);
+            pino.info('Done.');
+            uploadToMongo(docs, () => {
+              pino.info(`Done for ${term}`);
+            });
           });
-          pino.info('Writing cached file..');
-          jsonfile.writeFileSync(config.CACHED_FILE, docs);
-          pino.info('Done.');
-          uploadToMongo(docs);
         }
       })
       .on('error', e => pino.error(e)));
@@ -176,15 +199,17 @@ const doItAll = function doItAll() {
 if (config.OVERWRITE_FILE) {
   doItAll();
 } else {
-  pino.info('Reading cached file..');
-  jsonfile.readFile(config.CACHED_FILE, (err, obj) => {
-    if (err) {
-      pino.info('Not found.');
-      doItAll();
-    } else {
-      pino.info('Done.');
-      uploadToMongo(obj);
-    }
+  pino.info('Reading cached files..');
+  terminologies.forEach((terminology) => {
+    jsonfile.readFile(path.join(config.CACHED_DIR, terminology, config.CACHED_FILE), (err, obj) => {
+      if (err) {
+        pino.info('Not found.');
+        doItAll();
+      } else {
+        pino.info('Done.');
+        uploadToMongo(obj);
+      }
+    });
   });
 }
 
