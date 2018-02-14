@@ -5,18 +5,22 @@ const es = require('event-stream');
 const mongoose = require('mongoose');
 const config = require('./config.js');
 
+mongoose.Promise = Promise;
 mongoose.connect(config.MONGO_URL);
+mongoose.createConnection(config.MONGO_URL_EMIS);
 
-const Code = require('./model');
+const CodeREAD = require('./model')();
+const CodeEMIS = require('./model')('EMIS');
 
 const terminologies = fs.readdirSync('terminologies');
-const mem = {};
-let todo = 0;
-let done = 0;
+const mem = { EMIS: {}, Readv2: {} };
+const todo = { EMIS: 0, Readv2: 0, all: 0 };
+const done = { EMIS: 0, Readv2: 0, all: 0 };
 
 // Determines if the code is the root code for that terminology
 const isRoot = function isRoot(code, terminology) {
   if (terminology === 'Readv2' && code === '.....00') return true;
+  else if (terminology === 'EMIS' && code === '.....') return true;
   else if (!code) return true;
   return false;
 };
@@ -34,7 +38,7 @@ const doCode = function doCode(code, terminology) {
       return {};
     }
     G[code] = {};
-    mem[code].p.forEach((parent) => {
+    mem[terminology][code].p.forEach((parent) => {
       G[code][parent] = true;
       if (!GDone[parent]) G[parent] = doCode(parent, terminology);
       Object.keys(G[parent]).forEach((v) => {
@@ -59,7 +63,7 @@ const processDictionaryFile = function processDictionaryFile(terminology, direct
   pino.info(`Processing ${file}`);
   if (file.indexOf('dict.txt') < 0) return;
 
-  todo += 1;
+  todo[terminology] += 1;
   const s = fs.createReadStream(path.join(directory, file))
     .pipe(es.split())
     .pipe(es.mapSync((line) => {
@@ -70,15 +74,15 @@ const processDictionaryFile = function processDictionaryFile(terminology, direct
         function processLine() {
           // process line here and call s.resume() when rdy
           const bits = line.split('\t');
-          if (mem[bits[0]]) {
-            if (mem[bits[0]].t.indexOf(bits[1]) < 0) {
-              mem[bits[0]].t.push(bits[1]);
+          if (mem[terminology][bits[0]]) {
+            if (mem[terminology][bits[0]].t.indexOf(bits[1]) < 0) {
+              mem[terminology][bits[0]].t.push(bits[1]);
             }
-            if (mem[bits[0]].p.indexOf(bits[2]) < 0) {
-              mem[bits[0]].p.push(bits[2]);
+            if (mem[terminology][bits[0]].p.indexOf(bits[2]) < 0) {
+              mem[terminology][bits[0]].p.push(bits[2]);
             }
           } else {
-            mem[bits[0]] = {
+            mem[terminology][bits[0]] = {
               t: [bits[1]],
               p: [bits[2]],
             };
@@ -90,14 +94,16 @@ const processDictionaryFile = function processDictionaryFile(terminology, direct
       );
     })
       .on('end', () => {
-        done += 1;
+        done[terminology] += 1;
         pino.info('Read entirefile.');
-        if (todo === done) {
+        if (todo[terminology] === done[terminology]) {
           pino.info('ALL DONE');
 
-          const docs = Object.keys(mem).map((v) => {
+          const Code = terminology === 'Readv2' ? CodeREAD : CodeEMIS;
+
+          const docs = Object.keys(mem[terminology]).map((v) => {
             const ancestors = getAncestorsAsArray(v, terminology);
-            return { _id: v, t: mem[v].t.join('|'), a: ancestors, p: mem[v].p.join(',') };
+            return { _id: v, t: mem[terminology][v].t.join('|'), a: ancestors, p: mem[terminology][v].p.join(',') };
           });
           Code.collection.drop((errRemove) => {
             if (errRemove) {
@@ -119,7 +125,8 @@ const processDictionaryFile = function processDictionaryFile(terminology, direct
                     process.exit(1);
                   }
                   pino.info('INDEXES ADDED');
-                  process.exit(0);
+                  done.all += 1;
+                  if (done.all === todo.all) { process.exit(0); }
                 });
               }
             });
@@ -130,13 +137,14 @@ const processDictionaryFile = function processDictionaryFile(terminology, direct
 };
 
 // For a given terminology find all the data files and process them sequentially
-const processTerminology = function processTerminology(terminology) {
+const processTerminology = (terminology) => {
   pino.info(`Processing terminology ${terminology}`);
   try {
     const directory = path.join('terminologies', terminology, 'data-processed');
     fs.readdirSync(directory).forEach((file) => {
       processDictionaryFile(terminology, directory, file);
     });
+    todo.all += 1;
   } catch (e) {
     pino.info(`No files found for ${terminology}`);
   }

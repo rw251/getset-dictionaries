@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const config = require('./config');
 
 const Schema = mongoose.Schema;
 
@@ -11,4 +12,13 @@ const CodeSchema = new Schema({
 
 CodeSchema.index({ t: 'text' });
 
-module.exports = mongoose.model('Code', CodeSchema);
+module.exports = (terminology) => {
+  let model = mongoose.model('Code', CodeSchema);
+  switch (terminology) {
+    case 'EMIS':
+      model = mongoose.createConnection(config.MONGO_URL_EMIS).model('Code', CodeSchema);
+      break;
+    default:
+  }
+  return model;
+};
