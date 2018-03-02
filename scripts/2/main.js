@@ -6,9 +6,12 @@ const mongoose = require('mongoose');
 const jsonfile = require('jsonfile');
 const config = require('./config.js');
 
+mongoose.Promise = Promise;
 mongoose.connect(config.MONGO_URL);
+mongoose.createConnection(config.MONGO_URL_EMIS);
 
-const Code = require('./model');
+const CodeREAD = require('./model')();
+const CodeEMIS = require('./model')('EMIS');
 
 const terminologies = fs.readdirSync('terminologies');
 const mem = {};
@@ -63,40 +66,54 @@ const getAncestorsAsArray = function getAncestors(code, terminology) {
 
 const isFirstQuery = true;
 
-const dropMongoCollection = function dropMongoCollection(callback) {
+const dropMongoCollection = function dropMongoCollection(terminology, callback) {
+  const Code = terminology === 'Readv2' ? CodeREAD : CodeEMIS;
+
+  // NB mlab doesn't allow listCollections
+  // Code.db.db.listCollections({ name: 'codes' })
+  //   .next((err, collInfo) => {
+  //     if (collInfo) {
+      // collection exists so we drop
   Code.collection.drop((errRemove) => {
     if (errRemove) {
       pino.error(errRemove);
-      pino.info('Cant remove from collection Code');
+      pino.info(`Cant remove from collection Code for terminology ${terminology}`);
       process.exit(1);
     }
     callback();
   });
+    //   } else {
+    //     callback();
+    //   }
+    // });
 };
 
-const insertToMongo = function insertToMongo(docs, callback) {
+const insertToMongo = function insertToMongo(docs, terminology, callback) {
+  const Code = terminology === 'Readv2' ? CodeREAD : CodeEMIS;
   Code.collection.insert(docs, (errInsert) => {
     if (errInsert) {
       pino.error(errInsert);
       process.exit(1);
     } else {
-      pino.info('ALL INSERTED.');
-      pino.info('Adding indexes..');
+      pino.info(`ALL INSERTED FOR ${terminology}`);
+      pino.info(`Adding indexes for ${terminology}..`);
       Code.ensureIndexes((err) => {
           // need to call this to ensure the index gets added
         if (err) {
           pino.error(err);
           process.exit(1);
         }
-        pino.info('INDEXES ADDED');
+        pino.info(`INDEXES ADDED FOR ${terminology}`);
         callback();
       });
     }
   });
 };
 
-const uploadToMongo = function uploadToMongo(docs, callback) {
-  insertToMongo(docs, callback);
+const uploadToMongo = function uploadToMongo(docs, terminology, callback) {
+  dropMongoCollection(terminology, () => {
+    insertToMongo(docs, terminology, callback);
+  });
 };
 
 // For a given dictionary file load it and map to an object - mem
@@ -168,7 +185,7 @@ const processDictionaryFile = function processDictionaryFile(terminology, direct
             pino.info('Writing cached file..');
             jsonfile.writeFileSync(path.join(config.CACHED_DIR, term, config.CACHED_FILE), docs);
             pino.info('Done.');
-            uploadToMongo(docs, () => {
+            uploadToMongo(docs, term, () => {
               pino.info(`Done for ${term}`);
             });
           });
@@ -190,6 +207,10 @@ const processTerminology = function processTerminology(terminology) {
   }
 };
 
+const doItAllForTerminology = (terminology) => {
+  processTerminology(terminology);
+};
+
 const doItAll = function doItAll() {
   terminologies.forEach((terminology) => {
     processTerminology(terminology);
@@ -200,14 +221,23 @@ if (config.OVERWRITE_FILE) {
   doItAll();
 } else {
   pino.info('Reading cached files..');
+  const todoLocal = terminologies.length;
+  let doneLocal = 0;
   terminologies.forEach((terminology) => {
     jsonfile.readFile(path.join(config.CACHED_DIR, terminology, config.CACHED_FILE), (err, obj) => {
       if (err) {
-        pino.info('Not found.');
-        doItAll();
+        doneLocal += 1;
+        pino.info(`No cached file found for ${terminology}`);
+        doItAllForTerminology(terminology);
       } else {
-        pino.info('Done.');
-        uploadToMongo(obj);
+        pino.info(`Cached file for ${terminology} successfully loaded into memory.`);
+        uploadToMongo(obj, terminology, () => {
+          doneLocal += 1;
+          if (todoLocal === doneLocal) {
+            console.log('All files processed. Exiting');
+            process.exit(0);
+          }
+        });
       }
     });
   });

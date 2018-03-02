@@ -1,9 +1,12 @@
+require('dotenv').config();
+
 const BIT_LENGTH = 6;
 const CACHED_DIR = 'cache/2/';
 const CACHED_FILE = `bitLength${BIT_LENGTH}.json`;
-const OVERWRITE_FILE = true;
+const OVERWRITE_FILE = false;
 // const MONGO_URL = process.env.GETSET_MONGO_URL;
-const MONGO_URL = 'mongodb://localhost:27017/getset';
+const MONGO_URL = process.env.GETSET_MONGO_URL;
+const MONGO_URL_EMIS = process.env.GETSET_MONGO_URL_EMIS;
 
 module.exports = {
   BIT_LENGTH,
@@ -11,4 +14,5 @@ module.exports = {
   CACHED_FILE,
   OVERWRITE_FILE,
   MONGO_URL,
+  MONGO_URL_EMIS,
 };
