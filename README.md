@@ -19,7 +19,7 @@ The search is then done by e.g. if looking for diabetes we first find all codes 
 The above is all found within `./scripts/2/`. It can be executed with:
 
 ```
-node ./scripts/2/mains.js
+node ./scripts/2/main.js
 ```
 
 But first check out `./scripts/2/config.js` where you can tweak the below. As there are two stages (1. process the input files into a json file, 2. upload the json to mongo), we cache the json file to disk, allowing just stage 2 to occur.
