@@ -22,6 +22,7 @@
     "event-stream": "^3.3.4",
     "jsonfile": "^3.0.0",
     "map-stream": "0.0.7",
+    "mongodb": "^3.5.7",
     "mongoose": "^4.9.7",
     "pino": "^4.5.1",
     "stream-transform": "^0.1.2"
