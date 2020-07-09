@@ -1,24 +1,39 @@
 const mongoose = require('mongoose');
-const config = require('./config');
-
 const Schema = mongoose.Schema;
 
-const CodeSchema = new Schema({
-  _id: String, // The clinical code
-  t: String, // A | separated list of
-  a: String, // Ancestors in a comma delimited string
-  p: { type: String, index: true }, // Immediate parents in a comma delimited string
-});
+/**
+ * Each version of each terminology gets its own mongo collection
+ * containing the code as the _id, then information on the code
+ * description, parent and ancestor concepts, and an array of the
+ * individual words in the description
+ * @param {string} terminologyName 
+ */
+exports.Code = (terminologyName) => {
+  const CodeSchema = new Schema({
+    _id: String, // The clinical code
+    t: String, // A | separated list of definitions
+    a: { type: [String] }, // Ancestors in a comma delimited string
+    p: { type: [String] }, // Immediate parents in a comma delimited string
+    w: { type: [String] }, // An array of strings of length n contained in t
+  }, { autoIndex: false, collection: `codes-${terminologyName}` });
 
-CodeSchema.index({ t: 'text' });
+  CodeSchema.index({ a: 1 }, { background: false });
+  CodeSchema.index({ p: 1 }, { background: false });
+  CodeSchema.index({ w: 1 }, { background: false });
 
-module.exports = (terminology) => {
-  let model = mongoose.model('Code', CodeSchema);
-  switch (terminology) {
-    case 'EMIS':
-      model = mongoose.createConnection(config.MONGO_URL_EMIS).model('Code', CodeSchema);
-      break;
-    default:
-  }
-  return model;
+  return mongoose.model(`Code${terminologyName}`, CodeSchema);
 };
+
+/**
+ * 
+ * @param {string} terminologyName 
+ */
+exports.Word = (terminologyName) => {
+  const WordSchema = new Schema({
+    _id: String, // The word
+    n: Number, // Frequency of words
+  }, { autoIndex: false, collection: `words-${terminologyName}` });
+
+  return mongoose.model(`Word${terminologyName}`, WordSchema);
+};
+
