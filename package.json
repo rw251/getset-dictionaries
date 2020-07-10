@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "generate": "node --max_old_space_size=4096 scripts/main.js | pino",
+    "create": "node --max_old_space_size=4096 scripts/main.js createJSON | pino",
     "process": "node terminologies/wrapper.js | pino"
   },
   "author": "",

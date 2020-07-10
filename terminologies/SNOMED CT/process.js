@@ -1,5 +1,6 @@
 require('dotenv').config();
 const fs = require('fs');
+const { join } = require('path');
 const logger = require('pino')();
 const { run } = require('./scripts/parseSnomedFiles');
 
@@ -28,7 +29,14 @@ const getSnomedVersions = (directory) => {
   }
   logger.info(`Found the following versions: ${versions.join(', ')}`);
   return versions;
-}
+};
+
+const createOutputVersionDirIfNotExists = (version) => {
+  const dirPath = join(__dirname, 'data-processed', version);
+  if (!fs.existsSync(dirPath)){
+    fs.mkdirSync(dirPath);
+  }
+};
 
 const execute = async ({exitProcessOnMissingData = true} = {}) => {
   const inputFileLocation = getLocationOfInputFiles(exitProcessOnMissingData);
@@ -37,6 +45,7 @@ const execute = async ({exitProcessOnMissingData = true} = {}) => {
 
   // Execute promises sequentially
   for (const version of snomedVersions) {
+    createOutputVersionDirIfNotExists(version);
     await run(inputFileLocation, version)
   }
 }

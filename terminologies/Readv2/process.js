@@ -44,7 +44,14 @@ const getReadv2Versions = (directory) => {
 
   logger.info(`Found the following versions: ${versions.join(', ')}`);
   return versions;
-}
+};
+
+const createOutputVersionDirIfNotExists = (version) => {
+  const dirPath = join(__dirname, 'data-processed', version);
+  if (!fs.existsSync(dirPath)){
+    fs.mkdirSync(dirPath);
+  }
+};
 
 const execute = async ({exitProcessOnMissingData = true} = {}) => {
   const inputFileLocation = getLocationOfInputFiles(exitProcessOnMissingData);
@@ -53,6 +60,7 @@ const execute = async ({exitProcessOnMissingData = true} = {}) => {
 
   // Execute promises sequentially
   for (const version of readv2Versions) {
+    createOutputVersionDirIfNotExists(version);
     await readCodes.run(inputFileLocation, version);
     await readDrugs.run(inputFileLocation, version);
   }

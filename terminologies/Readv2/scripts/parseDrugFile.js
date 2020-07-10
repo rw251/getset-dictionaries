@@ -53,7 +53,7 @@ const run = (directory, version) => new Promise((resolve, reject) => {
 
   const inputLocation = getFileInputLocation(directory, version);
   const input = fs.createReadStream(inputLocation);
-  const output = fs.createWriteStream(join('terminologies', 'Readv2', 'data-processed',  `${version}.drugs.dict.txt`));
+  const output = fs.createWriteStream(join('terminologies', 'Readv2', 'data-processed', version, 'drugs.dict.txt'));
   const parser = parse({ delimiter: '|', trim: true, quote: '' });
 
   parser.on('error', (err) => {

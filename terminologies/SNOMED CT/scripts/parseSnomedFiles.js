@@ -77,7 +77,7 @@ const run = (directory, version, type = types.SNAPSHOT) => new Promise((resolve,
   const inputConceptsUK = fs.createReadStream(path.join(directory, version, UK.root, type, 'Terminology', UK.concept));
   const inputConcepts = fs.createReadStream(path.join(directory, version, International.root, type, 'Terminology', International.concept));
 
-  const outputStream = fs.createWriteStream(path.join('terminologies', 'SNOMED CT', 'data-processed', `${version}.dict.txt`));
+  const outputStream = fs.createWriteStream(path.join('terminologies', 'SNOMED CT', 'data-processed', version, 'dict.txt'));
   const readable = new Stream.Readable({
     read(size) {
       return !!size;
