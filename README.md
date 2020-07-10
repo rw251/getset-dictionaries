@@ -1,11 +1,52 @@
-# DISREGARD THE BELOW NEEDS REWRITING - CURRENT BEST IS IN 5
-
-
 # Dictionary processing for GetSet
 
-Everything you need to know to process a clinical code dictionary and then populate a mongo database to act as the backend for GetSet.
+Everything you need to know to process a clinical code dictionary and then populate a mongo database to act as the backend for GetSet. Currently the system is configured for Read v2, EMIS and SNOMED.
 
 ## Quick start
+
+This is if you want to process a terminology ***that already has*** a directory under `./terminologies`.
+
+1. Install all node dependencies
+    ```
+    npm i
+    ```
+2. Copy the `.env.example` file to `.env` and update it to reflect your environment. At the moment the only environment variables are the location of the mongo db you wish to update (`GETSET_MONGO_URL`), and locations of the raw clinical dictionary data (e.g. `SNOMED_DIRECTORY`).
+3. Download the data files for the terminologies you're interested in. For the existing terminologies they are found at:
+    - EMIS: proprietary system - not publically available
+    - SNOMED: https://isd.digital.nhs.uk/trud3/user/authenticated/group/0/pack/26/subpack/101/releases
+    - READ v2: Discontinued in 2016. Until recently was still available from https://isd.digital.nhs.uk/trud3, but no longer appears to be there. Please contact NHS digital to gain access.
+4. Extract the files and folders into the relevant directory as set in the `.env` file.
+    - READ v2: Directly under the `READ_V2_DIRECTORY` should be one directory per release. Within each release directory there should be a `codes` directory for the non-drug codes and a `drugs` directory for the drug codes. Therefore the directories will look like this:
+      ```js
+      READ_V2_DIRECTORY // Set in the .env file
+      ├─ v20160401 // One sub-directory for each release to process
+      │  ├─ codes // For the non-drug Read codes
+      │  │  ├─ Document
+      │  │  ├─ V2
+      │  │  └─ Vaf
+      │  └─ drugs // For the drug Read codes
+      │     ├─ Derived
+      │     ├─ Documents
+      │     └─ Source
+      └─ v20151001
+        ├─ codes
+        └─ drugs
+      ```
+    - SNOMED: Directly under the `SNOMED_DIRECTORY` should be one directory pre release. Therefore the directories will look like this:
+      ```js
+      SNOMED_DIRECTORY // Set in the .env file
+      ├─ uk_sct2cl_25.0.2_20180711000001 // One sub-directory for each release to process
+      │  ├─ SnomedCT_InternationalRF2_PRODUCTION_20180131T120000Z
+      │  └─ SnomedCT_UKClinicalRF2_Production_20180711T000001Z
+      └─ uk_sct2cl_29.3.0_20200610000001
+         ├─ SnomedCT_InternationalRF2_PRODUCTION_20180731T120000Z
+         └─ SnomedCT_UKClinicalRF2_PRODUCTION_20200610T000001Z
+      ```
+5. To convert the raw data files into ones that can be processed by the next stage execute:
+    ```
+    npm run process
+    ```
+6. Output files of the form `*.dict.txt` will be written into the `data-processed` directories within each terminology folder.
 
 **NB Ensure the `.env` file contains the correct mongo db url.**
 
