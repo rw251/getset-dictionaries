@@ -1,6 +1,7 @@
 const parse = require('csv-parse');
 const fs = require('fs');
-const path = require('path');
+const { join } = require('path');
+const logger = require('pino')();
 const transform = require('stream-transform');
 
 const getReadV2Parent = function getReadV2Parent(code) {
@@ -9,53 +10,66 @@ const getReadV2Parent = function getReadV2Parent(code) {
   return f > -1 ? `${code.substr(0, f - 1)}.${code.substr(f)}` : `${code.substr(0, code.length - 1)}.`;
 };
 
-const already = {};
+let already = {};
 
-const transformer = transform((data, callback) => {
-  setImmediate(function process() {
-    const parent = getReadV2Parent(data[7]);
-    const rtn = [null];
-    if (!already[data[7] + data[5] + data[2]]) {
-      rtn.push(`${data[7] + data[5]}\t${data[2]}\t${parent}\n`);
-      already[data[7] + data[5] + data[2]] = true;
-    }
-    // if (!already[data[7] + data[2]]) {
-    //   rtn.push(`${data[7]}\t${data[2]}\t${parent}\n`);
-    //   already[data[7] + data[2]] = true;
-    // }
-    if (data[3] && !already[data[7] + data[5] + data[3]]) {
-      rtn.push(`${data[7] + data[5]}\t${data[3]}\t${parent}\n`);
-      already[data[7] + data[5] + data[3]] = true;
-    }
-    if (data[4] && !already[data[7] + data[5] + data[4]]) {
-      rtn.push(`${data[7] + data[5]}\t${data[4]}\t${parent}\n`);
-      already[data[7] + data[5] + data[4]] = true;
-    }
-    callback.apply(this, rtn);
-  });
-}, { parallel: 20 });
-
-transformer.on('readable', (row) => {
-  while ((row = transformer.read()) !== null) {
-    return row;
+const doTheProcess = (data) => {
+  const parent = getReadV2Parent(data[7]);
+  const rtn = [];
+  if (!already[data[7] + data[5] + data[2]]) {
+    rtn.push(`${data[7] + data[5]}\t${data[2]}\t${parent}\n`);
+    already[data[7] + data[5] + data[2]] = true;
   }
+  if (data[3] && !already[data[7] + data[5] + data[3]]) {
+    rtn.push(`${data[7] + data[5]}\t${data[3]}\t${parent}\n`);
+    already[data[7] + data[5] + data[3]] = true;
+  }
+  if (data[4] && !already[data[7] + data[5] + data[4]]) {
+    rtn.push(`${data[7] + data[5]}\t${data[4]}\t${parent}\n`);
+    already[data[7] + data[5] + data[4]] = true;
+  }
+  return rtn.join('');
+};
+
+const transformer = transform(function(record, callback){
+  setImmediate(function(){
+    callback(null, doTheProcess(record));
+  })
+}, {
+  parallel: 5
 });
 
-transformer.on('error', (err) => {
-  console.log(err.message);
-});
+const getFileInputLocation = (directory, version) => {
+  const filePath = join(directory, version, 'codes', 'V2', 'Unified', 'Keyv2.all');
+  if(!fs.existsSync(filePath)) {
+    logger.error('The file', filePath, 'does not exist. Please download the READ v2 dictionary from TRUD.');
+    process.exit(1);
+  }
+  return filePath;
+};
 
-const run = function run(callback) {
+const run = (directory, version) => new Promise((resolve, reject) => {
+
+  already = {};
+  
+  const inputLocation = getFileInputLocation(directory, version);
+  const input = fs.createReadStream(inputLocation);
+  const output = fs.createWriteStream(join('terminologies', 'Readv2', 'data-processed', `${version}.codes.dict.txt`));
   const parser = parse({ delimiter: ',', trim: true });
 
-  const input = fs.createReadStream(path.join('terminologies', 'Readv2', 'data-input', 'Keyv2.all'));
-  const output = fs.createWriteStream(path.join('terminologies', 'Readv2', 'data-processed', 'Keyv2.all.js.dict.txt'));
-  output.on('finish', () => {
-    console.timeEnd('Elapsed');
-    if (callback) return callback();
+  parser.on('error', (err) => {
+    logger.error(err.message);
+    return reject();
   });
-  console.time('Elapsed');
+  parser.on('end', () => logger.info('Code file finished processing.'));
+
+  output.on('finish', () => {
+    logger.info('Code file written');
+    resolve();
+  });
+
+  logger.info('Code file start loading...');
   input.pipe(parser).pipe(transformer).pipe(output);
-};
+
+});
 
 module.exports = { run };

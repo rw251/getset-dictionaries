@@ -2,31 +2,82 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const Stream = require('stream');
+const logger = require('pino')();
 
-const relationships = {};
-const concepts = {};
-const activeConcepts = {};
+let relationships = {};
+let concepts = {};
+let activeConcepts = {};
 const types = { FULL: 'Full', SNAPSHOT: 'Snapshot' };
 
-const run = (type = types.SNAPSHOT) => {
-  console.time('Elapsed');
+const getSnomedHighLevelVersions = (directory, version, type) => {
+  const directories = fs.readdirSync(path.join(directory, version));
+  const UK = directories.filter(x => x.indexOf('SnomedCT_UK') === 0);
+  const International = directories.filter(x => x.indexOf('SnomedCT_International') === 0);
+  if(UK.length !== 1 || International.length !== 1) {
+    logger.error('The directory', directory, 'and version', version, 'does not conform to expectations');
+    process.exit(1);
+  }
+  const UKfiles = fs.readdirSync(path.join(directory, version, UK[0], type, 'Terminology'));
+  const Intfiles = fs.readdirSync(path.join(directory, version, International[0], type, 'Terminology'));
+  const UKrel = UKfiles.filter(x => x.indexOf('sct2_Relationship_') === 0);
+  const Intrel = Intfiles.filter(x => x.indexOf('sct2_Relationship_') === 0);
+  const UKstatedRel = UKfiles.filter(x => x.indexOf('sct2_StatedRelationship_') === 0);
+  const IntstatedRel = Intfiles.filter(x => x.indexOf('sct2_StatedRelationship_') === 0);
+  const UKdesc = UKfiles.filter(x => x.indexOf('sct2_Description_') === 0);
+  const Intdesc = Intfiles.filter(x => x.indexOf('sct2_Description_') === 0);
+  const UKconcept = UKfiles.filter(x => x.indexOf('sct2_Concept_') === 0);
+  const Intconcept = Intfiles.filter(x => x.indexOf('sct2_Concept_') === 0);
+  if(UKrel.length * UKstatedRel.length * UKdesc.length * UKconcept.length  !== 1) {
+    logger.error('The directory', path.join(directory, version, UK[0], type, 'Terminology'), 'does not conform to expectations');
+    process.exit(1);
+  }
+  if(Intrel.length * IntstatedRel.length * Intdesc.length * Intconcept.length !== 1) {
+    logger.error('The directory', path.join(directory, version, International[0], type, 'Terminology'), 'does not conform to expectations');
+    process.exit(1);
+  }
+  return { 
+    UK: {
+      root: UK[0],
+      rel: UKrel[0],
+      statedRel: UKstatedRel[0],
+      desc: UKdesc[0],
+      concept: UKconcept[0],
+    },
+    International: {
+      root: International[0],
+      rel: Intrel[0],
+      statedRel: IntstatedRel[0],
+      desc: Intdesc[0],
+      concept: Intconcept[0],
+    },
+  };
+}
+
+const run = (directory, version, type = types.SNAPSHOT) => new Promise((resolve, reject) => {
+
+  relationships = {};
+  concepts = {};
+  activeConcepts = {};
+
+  const {UK, International} = getSnomedHighLevelVersions(directory, version, type);
+
   // These are "inferred" relationships
-  const inputRelationshipsUK = fs.createReadStream(path.join('C:', 'Users', 'MDEHSRW9', 'Dropbox (The University of Manchester)', 'Me', 'Clinical code terminologies', 'uk_sct2cl_25.0.2_20180711000001', 'SnomedCT_UKClinicalRF2_Production_20180711T000001Z', type, 'Terminology', `sct2_Relationship_${type}_GB1000000_20180711.txt`));
-  const inputRelationships = fs.createReadStream(path.join('C:', 'Users', 'MDEHSRW9', 'Dropbox (The University of Manchester)', 'Me', 'Clinical code terminologies', 'uk_sct2cl_25.0.2_20180711000001', 'SnomedCT_InternationalRF2_PRODUCTION_20180131T120000Z', type, 'Terminology', `sct2_Relationship_${type}_INT_20180131.txt`));
+  const inputRelationshipsUK = fs.createReadStream(path.join(directory, version, UK.root, type, 'Terminology', UK.rel));
+  const inputRelationships = fs.createReadStream(path.join(directory, version, International.root, type, 'Terminology', International.rel));
 
   // These are "stated" relationships
-  const inputStatedRelationshipsUK = fs.createReadStream(path.join('C:', 'Users', 'MDEHSRW9', 'Dropbox (The University of Manchester)', 'Me', 'Clinical code terminologies', 'uk_sct2cl_25.0.2_20180711000001', 'SnomedCT_UKClinicalRF2_Production_20180711T000001Z', type, 'Terminology', `sct2_StatedRelationship_${type}_GB1000000_20180711.txt`));
-  const inputStatedRelationships = fs.createReadStream(path.join('C:', 'Users', 'MDEHSRW9', 'Dropbox (The University of Manchester)', 'Me', 'Clinical code terminologies', 'uk_sct2cl_25.0.2_20180711000001', 'SnomedCT_InternationalRF2_PRODUCTION_20180131T120000Z', type, 'Terminology', `sct2_StatedRelationship_${type}_INT_20180131.txt`));
+  const inputStatedRelationshipsUK = fs.createReadStream(path.join(directory, version, UK.root, type, 'Terminology', UK.statedRel));
+  const inputStatedRelationships = fs.createReadStream(path.join(directory, version, International.root, type, 'Terminology', International.statedRel));
 
   // Descriptions
-  const inputDescriptionsUK = fs.createReadStream(path.join('C:', 'Users', 'MDEHSRW9', 'Dropbox (The University of Manchester)', 'Me', 'Clinical code terminologies', 'uk_sct2cl_25.0.2_20180711000001', 'SnomedCT_UKClinicalRF2_Production_20180711T000001Z', type, 'Terminology', `sct2_Description_${type}-en-GB_GB1000000_20180711.txt`));
-  const inputDescriptions = fs.createReadStream(path.join('C:', 'Users', 'MDEHSRW9', 'Dropbox (The University of Manchester)', 'Me', 'Clinical code terminologies', 'uk_sct2cl_25.0.2_20180711000001', 'SnomedCT_InternationalRF2_PRODUCTION_20180131T120000Z', type, 'Terminology', `sct2_Description_${type}-en_INT_20180131.txt`));
+  const inputDescriptionsUK = fs.createReadStream(path.join(directory, version, UK.root, type, 'Terminology', UK.desc));
+  const inputDescriptions = fs.createReadStream(path.join(directory, version, International.root, type, 'Terminology', International.desc));
 
    // Concepts
-  const inputConceptsUK = fs.createReadStream(path.join('C:', 'Users', 'MDEHSRW9', 'Dropbox (The University of Manchester)', 'Me', 'Clinical code terminologies', 'uk_sct2cl_25.0.2_20180711000001', 'SnomedCT_UKClinicalRF2_Production_20180711T000001Z', type, 'Terminology', `sct2_Concept_${type}_GB1000000_20180711.txt`));
-  const inputConcepts = fs.createReadStream(path.join('C:', 'Users', 'MDEHSRW9', 'Dropbox (The University of Manchester)', 'Me', 'Clinical code terminologies', 'uk_sct2cl_25.0.2_20180711000001', 'SnomedCT_InternationalRF2_PRODUCTION_20180131T120000Z', type, 'Terminology', `sct2_Concept_${type}_INT_20180131.txt`));
+  const inputConceptsUK = fs.createReadStream(path.join(directory, version, UK.root, type, 'Terminology', UK.concept));
+  const inputConcepts = fs.createReadStream(path.join(directory, version, International.root, type, 'Terminology', International.concept));
 
-  const outputStream = fs.createWriteStream(path.join('terminologies', 'SNOMED CT', 'data-processed', 'uk.snomed.dict.txt'));
+  const outputStream = fs.createWriteStream(path.join('terminologies', 'SNOMED CT', 'data-processed', `${version}.dict.txt`));
   const readable = new Stream.Readable({
     read(size) {
       return !!size;
@@ -36,39 +87,18 @@ const run = (type = types.SNAPSHOT) => {
   readable.pipe(outputStream);
 
   outputStream.on('finish', () => {
-    console.timeEnd('Elapsed');
+    logger.info('Output written. All Done!');
+    return resolve();
   });
 
   const onRelationshipLine = (line) => {
     const elems = line.split('\t');
-    // if (['3844012023', '18020020', '18021024', '4570414021'].indexOf(elems[0]) > -1) console.log(line);
     if (elems[7] === '116680003' && elems[2] === '1') {
-      if (elems[4] === '105213004') console.log('R', elems.join('|'));
       if (!relationships[elems[4]]) {
         relationships[elems[4]] = [elems[5]];
       } else {
         relationships[elems[4]].push(elems[5]);
       }
-      // if (elems[0] === '999004611000000126') console.log(line);
-      // if (!relationships[elems[0]]) {
-      //   relationships[elems[0]] = {};
-      //   relationships[elems[0]][elems[4]] = { destination: elems[5], date: elems[1], active: elems[2] };
-      // } else if (!relationships[elems[0]][elems[4]] || relationships[elems[0]][elems[4]].destination !== elems[5]) {
-      //   console.log(line);
-      //   console.log('WHY!');
-      //   process.exit(1);
-      // } else if ((elems[1] === relationships[elems[0]][elems[4]].date && elems[2] === '1') || elems[1] > relationships[elems[0]][elems[4]].date) {
-      //   relationships[elems[0]][elems[4]] = { destination: elems[5], date: elems[1], active: elems[2] };
-      // }
-      // if (!relationships[elems[4]]) {
-      //   relationships[elems[4]] = {};
-      // }
-      // if (!relationships[elems[4]][elems[5]]) {
-      //   relationships[elems[4]][elems[5]] = { date: elems[1], active: elems[2] };
-      // } else if ((elems[1] === relationships[elems[4]][elems[5]].date && elems[2] === '1') || elems[1] > relationships[elems[4]][elems[5]].date) {
-      //   relationships[elems[4]][elems[5]] = { date: elems[1], active: elems[2] };
-      // }
-      if (elems[4] === '105213004') console.log('R', relationships[elems[4]]);
     }
   };
 
@@ -76,10 +106,6 @@ const run = (type = types.SNAPSHOT) => {
 
   const doMainProcessing = () => {
     Object.keys(concepts).forEach((conceptId) => {
-      if (conceptId === '105213004') {
-        console.log(activeConcepts[conceptId]);
-        console.log(relationships[conceptId]);
-      }
       if (activeConcepts[conceptId].active === '0') return;
       const already = {};
       concepts[conceptId].forEach((description) => {
@@ -89,9 +115,7 @@ const run = (type = types.SNAPSHOT) => {
             readable.push(`${conceptId}\t${description}\t?\n`);
           }
         } else {
-          // Object.keys(relationships[conceptId]).forEach((parentId) => {
           relationships[conceptId].forEach((parentId) => {
-            // if (relationships[conceptId][parentId].active === '0') return;
             if (!already[`${conceptId}\t${description}\t${parentId}\n`]) {
               already[`${conceptId}\t${description}\t${parentId}\n`] = true;
               readable.push(`${conceptId}\t${description}\t${parentId}\n`);
@@ -106,19 +130,19 @@ const run = (type = types.SNAPSHOT) => {
   const areWeDone = () => {
     done += 1;
     if (done === 8) {
-      console.log('All files loaded.');
+      logger.info('All files loaded into memory. Starting the main processing...');
       try {
         doMainProcessing();
       } catch (err) {
-        console.log('err');
-        console.log(err);
+        logger.info('err');
+        logger.info(err);
       }
-      console.log('Processing of records complete.');
+      logger.info('Processing of records complete. Finishing writing output...');
     }
   };
 
   const onRelationshipEnd = () => {
-    console.log(`Relationships loaded: ${Object.keys(relationships).length}`);
+    logger.info(`Relationships loaded: ${Object.keys(relationships).length}`);
     areWeDone();
   };
 
@@ -164,7 +188,7 @@ const run = (type = types.SNAPSHOT) => {
   };
 
   const onDescriptionEnd = () => {
-    console.log(`Concepts loaded: ${Object.keys(concepts).length}`);
+    logger.info(`Concepts loaded: ${Object.keys(concepts).length}`);
     areWeDone();
   };
 
@@ -197,19 +221,13 @@ const run = (type = types.SNAPSHOT) => {
     } else if (type === types.SNAPSHOT) {
       activeConcepts[elems[0]] = { date: elems[1], active: elems[2] };
     } else {
-      console.error(`unknown type${type}`);
-      process.exit(1);
-    }
-
-
-    if (elems[0] === '105213004') {
-      // console.log('C', line);
-      // console.log('C', activeConcepts[elems[0]]);
+      logger.error(`unknown type${type}`);
+      return reject();
     }
   };
 
   const onConceptEnd = () => {
-    console.log(`Active concepts loaded: ${Object.keys(activeConcepts).length}`);
+    logger.info(`Active concepts loaded: ${Object.keys(activeConcepts).length}`);
     areWeDone();
   };
 
@@ -228,6 +246,6 @@ const run = (type = types.SNAPSHOT) => {
   rlConcepts
       .on('line', onConceptLine)
       .on('close', onConceptEnd);
-};
+});
 
 module.exports = { run };
