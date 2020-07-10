@@ -6,6 +6,8 @@ const readline = require('readline');
 const JSONStream = require('JSONStream');
 const config = require('./config.js');
 
+const CACHED_DIR = 'cache';
+
 mongoose.Promise = Promise;
 
 const { Code, Word } = require('./model');
@@ -208,9 +210,9 @@ const processInMemoryTerminologies = () => {
 
     pino.info(`Writing cached doc files for ${terminology.id}..`);
 
-    await writeDocFiles(docs, path.join(config.CACHED_DIR, terminology.id, config.CACHED_FILE));
+    await writeDocFiles(docs, path.join(CACHED_DIR, terminology.id, CACHED_FILE));
     pino.info(`1 doc file written for ${terminology.id}..`);
-    await writeDocFiles(docWithWords, path.join(config.CACHED_DIR, terminology.id, `words_${config.CACHED_FILE}`));
+    await writeDocFiles(docWithWords, path.join(CACHED_DIR, terminology.id, `words_${CACHED_FILE}`));
     pino.info(`Both doc files written for ${terminology.id}..`);
     await uploadToMongo(docs, docWithWords, terminology);
   });
@@ -298,8 +300,8 @@ const loadCachedFile = filepath => new Promise((resolve, reject) => {
 
 const loadCachedFiles = async (terminology) => {
   const result = await Promise.all([
-    loadCachedFile(path.join(config.CACHED_DIR, terminology, config.CACHED_FILE)),
-    loadCachedFile(path.join(config.CACHED_DIR, terminology, `words_${config.CACHED_FILE}`)),
+    loadCachedFile(path.join(CACHED_DIR, terminology, CACHED_FILE)),
+    loadCachedFile(path.join(CACHED_DIR, terminology, `words_${CACHED_FILE}`)),
   ]);
   return result;
 };
