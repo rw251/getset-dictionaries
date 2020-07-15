@@ -6,17 +6,20 @@ const Schema = mongoose.Schema;
  * containing the code as the _id, then information on the code
  * description, parent and ancestor concepts, and an array of the
  * individual words in the description
- * @param {string} terminologyName 
- * @param {string} version 
+ * @param {string} terminologyName
+ * @param {string} version
  */
 exports.Code = (terminologyName, version) => {
-  const CodeSchema = new Schema({
-    _id: String, // The clinical code
-    t: String, // A | separated list of definitions
-    a: { type: [String] }, // Ancestors in a comma delimited string
-    p: { type: [String] }, // Immediate parents in a comma delimited string
-    w: { type: [String] }, // An array of strings of length n contained in t
-  }, { autoIndex: false, collection: `codes-${terminologyName}-${version}` });
+  const CodeSchema = new Schema(
+    {
+      _id: String, // The clinical code
+      t: String, // A | separated list of definitions
+      a: { type: [String] }, // Ancestors in a comma delimited string
+      p: { type: [String] }, // Immediate parents in a comma delimited string
+      w: { type: [String] }, // An array of strings of length n contained in t
+    },
+    { autoIndex: false, collection: `codes-${terminologyName}-${version}` }
+  );
 
   CodeSchema.index({ a: 1 }, { background: false });
   CodeSchema.index({ p: 1 }, { background: false });
@@ -26,16 +29,18 @@ exports.Code = (terminologyName, version) => {
 };
 
 /**
- * 
- * @param {string} terminologyName 
+ *
+ * @param {string} terminologyName
  * @param {string} version
  */
 exports.Word = (terminologyName, version) => {
-  const WordSchema = new Schema({
-    _id: String, // The word
-    n: Number, // Frequency of words
-  }, { autoIndex: false, collection: `words-${terminologyName}-${version}` });
+  const WordSchema = new Schema(
+    {
+      _id: String, // The word
+      n: Number, // Frequency of words
+    },
+    { autoIndex: false, collection: `words-${terminologyName}-${version}` }
+  );
 
   return mongoose.model(`Word${terminologyName}${version}`, WordSchema);
 };
-

@@ -1,7 +1,5 @@
 // nothing to see here
 
-const execute = () => {
-  
-};
+const execute = () => {};
 
 module.exports = { execute };

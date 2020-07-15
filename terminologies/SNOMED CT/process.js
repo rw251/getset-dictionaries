@@ -6,15 +6,17 @@ const { run } = require('./scripts/parseSnomedFiles');
 
 const getLocationOfInputFiles = (exitProcessOnMissingData) => {
   const directory = process.env.SNOMED_DIRECTORY;
-  if(!directory) {
-    logger.error('The env variable SNOMED_DIRECTORY is not set. Please make sure you\'ve followed the README and created a .env file.');
-    if(exitProcessOnMissingData) process.exit(1);
+  if (!directory) {
+    logger.error(
+      "The env variable SNOMED_DIRECTORY is not set. Please make sure you've followed the README and created a .env file."
+    );
+    if (exitProcessOnMissingData) process.exit(1);
     return false;
   }
   logger.info(`SNOMED directory from env vars: ${directory}`);
-  if(!fs.existsSync(directory)) {
+  if (!fs.existsSync(directory)) {
     logger.error(`The SNOMED_DIRECTORY does not exist. Please make sure that ${directory} exists.`);
-    if(exitProcessOnMissingData) process.exit(1);
+    if (exitProcessOnMissingData) process.exit(1);
     return false;
   }
   return directory;
@@ -23,8 +25,10 @@ const getLocationOfInputFiles = (exitProcessOnMissingData) => {
 const getSnomedVersions = (directory) => {
   logger.info('Searching for SNOMED version directories');
   const versions = fs.readdirSync(directory);
-  if(!versions.length) {
-    logger.warn(`There don\'t seem to be any sub-directories in the SNOMED directory: ${directory}`);
+  if (!versions.length) {
+    logger.warn(
+      `There don\'t seem to be any sub-directories in the SNOMED directory: ${directory}`
+    );
     process.exit(0);
   }
   logger.info(`Found the following versions: ${versions.join(', ')}`);
@@ -33,21 +37,21 @@ const getSnomedVersions = (directory) => {
 
 const createOutputVersionDirIfNotExists = (version) => {
   const dirPath = join(__dirname, 'data-processed', version);
-  if (!fs.existsSync(dirPath)){
+  if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath);
   }
 };
 
-const execute = async ({exitProcessOnMissingData = true} = {}) => {
+const execute = async ({ exitProcessOnMissingData = true } = {}) => {
   const inputFileLocation = getLocationOfInputFiles(exitProcessOnMissingData);
-  if(!inputFileLocation) return;
+  if (!inputFileLocation) return;
   const snomedVersions = getSnomedVersions(inputFileLocation);
 
   // Execute promises sequentially
   for (const version of snomedVersions) {
     createOutputVersionDirIfNotExists(version);
-    await run(inputFileLocation, version)
+    await run(inputFileLocation, version);
   }
-}
+};
 
 module.exports = { execute };
