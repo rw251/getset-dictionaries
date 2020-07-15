@@ -1,7 +1,8 @@
 const parse = require('csv-parse');
 const fs = require('fs');
 const { join } = require('path');
-const logger = require('pino')();
+const parentLogger = require('../../../scripts/logger');
+const logger = parentLogger.child({ terminology: 'Readv2 (Drugs)' });
 const transform = require('stream-transform');
 
 const getReadV2Parent = function getReadV2Parent(code) {
@@ -44,14 +45,7 @@ const transformer = transform(
 );
 
 const getFileInputLocation = (directory, version) => {
-  const filePath = join(
-    directory,
-    version,
-    'drugs',
-    'Source',
-    'v1_v2',
-    'unidrug.key'
-  );
+  const filePath = join(directory, version, 'drugs', 'Source', 'v1_v2', 'unidrug.key');
   if (!fs.existsSync(filePath)) {
     logger.error(
       'The file',
@@ -70,13 +64,7 @@ const run = (directory, version) =>
     const inputLocation = getFileInputLocation(directory, version);
     const input = fs.createReadStream(inputLocation);
     const output = fs.createWriteStream(
-      join(
-        'terminologies',
-        'Readv2',
-        'data-processed',
-        version,
-        'drugs.dict.txt'
-      )
+      join('terminologies', 'Readv2', 'data-processed', version, 'drugs.dict.txt')
     );
     const parser = parse({ delimiter: '|', trim: true, quote: '' });
 

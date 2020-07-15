@@ -2,7 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const Stream = require('stream');
-const logger = require('pino')();
+const parentLogger = require('../../../scripts/logger');
+const logger = parentLogger.child({ terminology: 'SNOMED' });
 
 let relationships = {};
 let concepts = {};
@@ -15,6 +16,7 @@ const getSnomedHighLevelVersions = (directory, version, type) => {
   const International = directories.filter((x) => x.indexOf('SnomedCT_International') === 0);
   if (UK.length !== 1 || International.length !== 1) {
     logger.error(
+      { version },
       'The directory',
       directory,
       'and version',
@@ -37,6 +39,7 @@ const getSnomedHighLevelVersions = (directory, version, type) => {
   const Intconcept = Intfiles.filter((x) => x.indexOf('sct2_Concept_') === 0);
   if (UKrel.length * UKstatedRel.length * UKdesc.length * UKconcept.length !== 1) {
     logger.error(
+      { version },
       'The directory',
       path.join(directory, version, UK[0], type, 'Terminology'),
       'does not conform to expectations'
@@ -45,6 +48,7 @@ const getSnomedHighLevelVersions = (directory, version, type) => {
   }
   if (Intrel.length * IntstatedRel.length * Intdesc.length * Intconcept.length !== 1) {
     logger.error(
+      { version },
       'The directory',
       path.join(directory, version, International[0], type, 'Terminology'),
       'does not conform to expectations'
@@ -128,7 +132,7 @@ const run = (directory, version, type = types.SNAPSHOT) =>
     readable.pipe(outputStream);
 
     outputStream.on('finish', () => {
-      logger.info('Output written. All Done!');
+      logger.info({ version }, 'Output written. All Done!');
       return resolve();
     });
 
@@ -171,19 +175,19 @@ const run = (directory, version, type = types.SNAPSHOT) =>
     const areWeDone = () => {
       done += 1;
       if (done === 8) {
-        logger.info('All files loaded into memory. Starting the main processing...');
+        logger.info({ version }, 'All files loaded into memory. Starting the main processing...');
         try {
           doMainProcessing();
         } catch (err) {
-          logger.info('err');
-          logger.info(err);
+          logger.info({ version }, 'err');
+          logger.info({ version }, err);
         }
-        logger.info('Processing of records complete. Finishing writing output...');
+        logger.info({ version }, 'Processing of records complete. Finishing writing output...');
       }
     };
 
     const onRelationshipEnd = () => {
-      logger.info(`Relationships loaded: ${Object.keys(relationships).length}`);
+      logger.info({ version }, `Relationships loaded: ${Object.keys(relationships).length}`);
       areWeDone();
     };
 
@@ -222,7 +226,7 @@ const run = (directory, version, type = types.SNAPSHOT) =>
     };
 
     const onDescriptionEnd = () => {
-      logger.info(`Concepts loaded: ${Object.keys(concepts).length}`);
+      logger.info({ version }, `Concepts loaded: ${Object.keys(concepts).length}`);
       areWeDone();
     };
 
@@ -253,13 +257,13 @@ const run = (directory, version, type = types.SNAPSHOT) =>
       } else if (type === types.SNAPSHOT) {
         activeConcepts[elems[0]] = { date: elems[1], active: elems[2] };
       } else {
-        logger.error(`unknown type${type}`);
+        logger.error({ version }, `unknown type${type}`);
         return reject();
       }
     };
 
     const onConceptEnd = () => {
-      logger.info(`Active concepts loaded: ${Object.keys(activeConcepts).length}`);
+      logger.info({ version }, `Active concepts loaded: ${Object.keys(activeConcepts).length}`);
       areWeDone();
     };
 

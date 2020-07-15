@@ -1,7 +1,8 @@
 require('dotenv').config();
 const fs = require('fs');
 const { join } = require('path');
-const logger = require('pino')();
+const inquirer = require('inquirer');
+const logger = require('../../scripts/logger');
 const { run } = require('./scripts/parseSnomedFiles');
 
 const getLocationOfInputFiles = (exitProcessOnMissingData) => {
@@ -38,7 +39,16 @@ const getSnomedVersions = (directory) => {
 const createOutputVersionDirIfNotExists = (version) => {
   const dirPath = join(__dirname, 'data-processed', version);
   if (!fs.existsSync(dirPath)) {
+    logger.info('SNOMED:');
     fs.mkdirSync(dirPath);
+  }
+};
+
+const processVersions = async (versions, inputFileLocation) => {
+  // Execute promises sequentially
+  for (const version of versions) {
+    createOutputVersionDirIfNotExists(version);
+    await run(inputFileLocation, version);
   }
 };
 
@@ -47,11 +57,29 @@ const execute = async ({ exitProcessOnMissingData = true } = {}) => {
   if (!inputFileLocation) return;
   const snomedVersions = getSnomedVersions(inputFileLocation);
 
-  // Execute promises sequentially
-  for (const version of snomedVersions) {
-    createOutputVersionDirIfNotExists(version);
-    await run(inputFileLocation, version);
+  const ALL = 'ALL';
+  const choices = [{ name: 'All', value: ALL }, new inquirer.Separator()].concat(snomedVersions);
+
+  if (choices.length < 4) {
+    return processVersions(snomedVersions, inputFileLocation);
   }
+
+  return inquirer
+    .prompt([
+      {
+        type: 'list',
+        name: 'version',
+        message: 'Which SNOMED version do you want to process?',
+        choices,
+      },
+    ])
+    .then((answer) => {
+      if (answer.version === ALL) {
+        processVersions(snomedVersions, inputFileLocation);
+      } else {
+        processVersions([answer.version], inputFileLocation);
+      }
+    });
 };
 
 module.exports = { execute };
