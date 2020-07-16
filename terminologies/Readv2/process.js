@@ -30,7 +30,7 @@ const getReadv2Versions = (directory) => {
   const versions = fs.readdirSync(directory);
   if (!versions.length) {
     logger.warn(
-      `There don\'t seem to be any sub-directories in the READ v2 directory: ${directory}`
+      `There don't seem to be any sub-directories in the READ v2 directory: ${directory}`
     );
     process.exit(0);
   }

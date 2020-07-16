@@ -27,9 +27,7 @@ const getSnomedVersions = (directory) => {
   logger.info('Searching for SNOMED version directories');
   const versions = fs.readdirSync(directory);
   if (!versions.length) {
-    logger.warn(
-      `There don\'t seem to be any sub-directories in the SNOMED directory: ${directory}`
-    );
+    logger.warn(`There don't seem to be any sub-directories in the SNOMED directory: ${directory}`);
     process.exit(0);
   }
   logger.info(`Found the following versions: ${versions.join(', ')}`);
