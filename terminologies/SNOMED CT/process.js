@@ -2,7 +2,7 @@ require('dotenv').config();
 const fs = require('fs');
 const { join } = require('path');
 const inquirer = require('inquirer');
-const logger = require('../../scripts/logger');
+const logger = require('../../src/logger');
 const { run } = require('./scripts/parseSnomedFiles');
 
 const getLocationOfInputFiles = (exitProcessOnMissingData) => {

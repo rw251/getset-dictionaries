@@ -1,10 +1,15 @@
 {
-  "extends": [ "prettier" ],
+  "extends": ["prettier", "eslint:recommended"],
   "plugins": ["prettier"],
   "rules": {
-    "prettier/prettier": "error"
+    "prettier/prettier": "error",
+    "arrow-body-style": ["error", "as-needed"]
   },
   "parserOptions": {
     "ecmaVersion": 2017
+  },
+  "env": {
+    "node": true,
+    "es6": true
   }
 }

@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const Stream = require('stream');
-const parentLogger = require('../../../scripts/logger');
+const parentLogger = require('../../../src/logger');
 const logger = parentLogger.child({ terminology: 'SNOMED' });
 
 let relationships = {};

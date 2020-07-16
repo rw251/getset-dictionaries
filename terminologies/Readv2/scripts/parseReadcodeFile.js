@@ -1,7 +1,7 @@
 const parse = require('csv-parse');
 const fs = require('fs');
 const { join } = require('path');
-const parentLogger = require('../../../scripts/logger');
+const parentLogger = require('../../../src/logger');
 const logger = parentLogger.child({ terminology: 'Readv2' });
 const transform = require('stream-transform');
 

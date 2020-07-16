@@ -1,7 +1,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const { join } = require('path');
-const logger = require('../../scripts/logger');
+const logger = require('../../src/logger');
 const readDrugs = require('./scripts/parseDrugFile');
 const readCodes = require('./scripts/parseReadcodeFile');
 

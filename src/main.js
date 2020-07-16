@@ -1,11 +1,18 @@
 const fs = require('fs');
 const { join } = require('path');
-const inquirer = require('inquirer');
 const parentLogger = require('./logger');
 const mongoose = require('mongoose');
 const readline = require('readline');
 const JSONStream = require('JSONStream');
 const { Code, Word } = require('./model');
+const {
+  whichTerminolgiesToProcess,
+  whichTerminologiesToUpload,
+  whichRawTerminologyToProcess,
+  whatToDo,
+  optionNames,
+} = require('./scripts/questions');
+const { processRawTerminologies } = require('../terminologies/wrapper');
 require('dotenv').config();
 
 const CACHED_DIR = join(__dirname, '..', 'cache');
@@ -152,10 +159,10 @@ const dropCollections = async (tvs = cachedTerminologyVersions) => {
 };
 
 // Adds the indexes to the collection and returns a promise
-const ensureIndexes = async (collection) => {
+const createIndexes = async (collection) => {
   logger.info(`Adding indexes to ${collection.modelName}...`);
   try {
-    await collection.ensureIndexes();
+    await collection.createIndexes();
     logger.info(`Indexes added to ${collection.modelName}`);
   } catch (err) {
     logger.info(`Failed to add indexes to ${collection.modelName}`);
@@ -164,15 +171,15 @@ const ensureIndexes = async (collection) => {
   }
 };
 
-const addIndexes = async (tvs = cachedTerminologyVersions) => {
-  await Promise.all(
-    tvs.reduce((p, c) => {
-      p.push(ensureIndexes(c.codeCollection));
-      p.push(ensureIndexes(c.wordCollection));
-      return p;
-    }, [])
+const addIndexes = (tvs = cachedTerminologyVersions) =>
+  Promise.all(
+    tvs.map((terminology) =>
+      Promise.all([
+        createIndexes(terminology.codeCollection),
+        createIndexes(terminology.wordCollection),
+      ])
+    )
   );
-};
 
 // Insert documents to mongo and then return a promise
 const insertToMongo = async (collection, docs, terminology) => {
@@ -197,17 +204,31 @@ const uploadToMongo = async (docs, docsWithWords, terminology) => {
   ]);
 };
 
+/**
+ * Takes the string definitions and splits them into words
+ * @param {object} terminology The terminology to work on
+ */
 const splitDefinitionsIntoWords = (terminology) => {
   const wordCounter = {};
   Object.keys(mem[terminology.id][terminology.version]).forEach((v) => {
     const nword = {};
     mem[terminology.id][terminology.version][v].t.forEach((vv) => {
       if (vv) {
-        vv.toLowerCase()
-          .split(' ')
+        vv.toLowerCase() // make case consistent
+          .split(' ') // separate into "words" by splitting on spaces
           .forEach((word) => {
+            // trim any non-alphanumeric characters from the word
             const trimmedWord = word.replace(/(^[^\w\d]*|[^\w\d]*$)/g, '');
+
+            if (trimmedWord === '') return; // was just non-alphanumeric characters
+
             nword[trimmedWord] = true;
+
+            // check for word boundaries "\b" within the trimmed word
+            // this will never be spaces because of the earlier split, but
+            // might be things like "one/two". We want to keep "one/two" as
+            // a single word (in case it's important to search for it), but also
+            // to add "one" and "two" separately.
             const matches = trimmedWord.match(/\b[\w\d]+\b/g);
             if (!matches || matches.length === 0) {
               return;
@@ -345,12 +366,6 @@ const processTerminology = function processTerminology(terminology) {
   }
 };
 
-const doItAll = function doItAll() {
-  terminologyVersions.forEach((terminology) => {
-    processTerminology(terminology);
-  });
-};
-
 const loadCachedFile = (filepath) =>
   new Promise((resolve, reject) => {
     const transformStream = JSONStream.parse('*');
@@ -378,100 +393,63 @@ const loadCachedFiles = async (terminology, version) => {
 
 const connectToMongo = () =>
   mongoose.connect(process.env.GETSET_MONGO_URL, {
-    server: { socketOptions: { socketTimeoutMS: 0 } },
+    socketOptions: { socketTimeoutMS: 0 },
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
   });
-// .then(async () => {
-//   await dropCollections();
 
-//   if (config.OVERWRITE_FILE) {
-//     doItAll();
-//   } else {
-//     logger.info('Reading cached files..');
-//     await Promise.all(
+const disconnectFromMongo = () => mongoose.disconnect();
 
-//     );
-
-//     await addIndexes();
-
-//     process.exit(0);
-//   }
-// });
-
-const createJSON = () => {
-  terminologyVersions.forEach((terminology) => {
+const createJSON = (tvs = terminologyVersions) => {
+  tvs.forEach((terminology) => {
     processTerminology(terminology);
   });
 };
 
-const uploadJSON = async (tvs = cachedTerminologyVersions) => {
+const uploadJSON = async (tvs = cachedTerminologyVersions, shouldAddIndexes = true) => {
+  await connectToMongo();
   await dropCollections(tvs);
-  tvs.map(async (terminology) => {
-    const [docs, docWithWords] = await loadCachedFiles(terminology.id, terminology.version);
-    await uploadToMongo(docs, docWithWords, terminology);
-  });
-  await addIndexes(tvs);
+  await Promise.all(
+    tvs.map(async (terminology) => {
+      const [docs, docWithWords] = await loadCachedFiles(terminology.id, terminology.version);
+      return uploadToMongo(docs, docWithWords, terminology);
+    })
+  );
+  if (shouldAddIndexes) await addIndexes(tvs);
+  await disconnectFromMongo();
 };
-const ALL = 'ALL';
-const separator = ' - ';
 
-switch (process.argv[2]) {
-  case 'createJSON': {
-    const choices = [{ name: 'All', value: ALL }, new inquirer.Separator()].concat(
-      terminologyVersions.map((x) => `${x.id}${separator}${x.version}`)
-    );
-    inquirer
-      .prompt([
-        {
-          type: 'list',
-          name: 'terminology',
-          message: 'Which terminology do you want to process?',
-          choices,
-        },
-      ])
-      .then((answer) => {
-        if (answer.terminology === ALL) {
-          createJSON();
-        } else {
-          const [id, version] = answer.terminology.split(separator);
-          const terminology = terminologyVersions.filter(
-            (x) => x.id === id && x.version === version
-          )[0];
-          return processTerminology(terminology);
-        }
-      });
-    break;
+const justAddIndexes = async (tvs = cachedTerminologyVersions) => {
+  await connectToMongo();
+  await addIndexes(tvs);
+  await disconnectFromMongo();
+};
+
+const main = async () => {
+  const letsDo = await whatToDo();
+  console.log(letsDo);
+  switch (letsDo) {
+    case optionNames.fromFormatToJSON: {
+      const terminologiesToCreate = await whichTerminolgiesToProcess(terminologyVersions);
+      return createJSON(terminologiesToCreate);
+    }
+    case optionNames.uploadAndIndex: {
+      const terminologiesToUpload = await whichTerminologiesToUpload(cachedTerminologyVersions);
+      return uploadJSON(terminologiesToUpload, true);
+    }
+    case optionNames.uploadJSON: {
+      const terminologiesToUpload = await whichTerminologiesToUpload(cachedTerminologyVersions);
+      return uploadJSON(terminologiesToUpload, false);
+    }
+    case optionNames.addIndexes: {
+      const terminologiesToUpload = await whichTerminologiesToUpload(cachedTerminologyVersions);
+      return justAddIndexes(terminologiesToUpload);
+    }
+    case optionNames.fromRawToFormat: {
+      const terminologyToProcess = await whichRawTerminologyToProcess();
+      return processRawTerminologies(terminologyToProcess);
+    }
   }
-  case 'uploadJSON': {
-    const choices = [{ name: 'All', value: ALL }, new inquirer.Separator()].concat(
-      cachedTerminologyVersions.map((x) => `${x.id}${separator}${x.version}`)
-    );
-    inquirer
-      .prompt([
-        {
-          type: 'list',
-          name: 'terminology',
-          message: 'Which cached terminology file do you want to upload?',
-          choices,
-        },
-      ])
-      .then((answer) => {
-        connectToMongo().then(() => {
-          if (answer.terminology === ALL) {
-            uploadJSON();
-          } else {
-            const [id, version] = answer.terminology.split(separator);
-            const terminology = cachedTerminologyVersions.filter(
-              (x) => x.id === id && x.version === version
-            )[0];
-            return uploadJSON([terminology]);
-          }
-        });
-      });
-    break;
-  }
-  default: {
-    logger.warn(
-      "You must call this with `node main.js [operation]` where [operation] is either 'createJSON' or 'uploadJSON'."
-    );
-  }
-}
+};
+
+main();
