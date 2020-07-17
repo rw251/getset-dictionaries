@@ -3,7 +3,6 @@ const { join } = require('path');
 const parentLogger = require('./logger');
 const mongoose = require('mongoose');
 const readline = require('readline');
-const JSONStream = require('JSONStream');
 const { Code, Word } = require('./model');
 const {
   whichTerminolgiesToProcess,
@@ -23,8 +22,6 @@ const cachedTerminologyVersions = [];
 const mem = {};
 const GDone = {};
 const G = {};
-let todo = 0;
-let done = 0;
 let logger = parentLogger;
 
 mongoose.Promise = Promise;
@@ -185,10 +182,8 @@ const addIndexes = (tvs = cachedTerminologyVersions) =>
 const insertToMongo = async (collection, docs, terminology) => {
   logger.info(`${terminology}: Inserting documents for ${collection.modelName}...`);
   try {
-    // const batch = Code.collection.initializeUnorderedBulkOp();
     const operations = docs.map((doc) => ({ insertOne: { document: doc } }));
-    // await batch.execute();
-    await collection.collection.bulkWrite(operations);
+    await collection.collection.bulkWrite(operations, { ordered: false });
     logger.info(`${terminology}: All documents inserted for ${collection.modelName}.`);
   } catch (errInsert) {
     logger.info(`${terminology}: Documents failed to insert for ${collection.modelName}.`);
@@ -274,120 +269,136 @@ const createDocsForWordsCollection = (terminology) =>
 
 const writeDocFiles = (docs, filepath) =>
   new Promise((resolve, reject) => {
-    const transformStream = JSONStream.stringify('[\n ', ',\n ', '\n]\n');
-    const outputStream = fs.createWriteStream(filepath);
-    transformStream.pipe(outputStream);
-    docs.forEach(transformStream.write);
-    transformStream.end();
+    const Stream = require('stream');
+    const readable = new Stream.Readable();
 
-    outputStream.on('finish', resolve);
+    const outputStream = fs.createWriteStream(filepath);
+    readable.pipe(outputStream);
+
+    // Start of array
+    readable.push(`[\n ${JSON.stringify(docs[0])}`);
+
+    // Array items
+    docs.slice(1).forEach((item) => readable.push(`,\n ${JSON.stringify(item)}`));
+
+    // End of array
+    readable.push('\n]\n');
+    // no more data
+    readable.push(null);
+
+    outputStream.on('finish', () => {
+      logger.info(`${filepath} written to disk.`);
+      return resolve();
+    });
     outputStream.on('error', reject);
   });
 
-const processInMemoryTerminologies = () => {
-  terminologyVersions.forEach(async (terminology) => {
-    if (!mem[terminology.id]) return;
-    if (!mem[terminology.id][terminology.version]) return;
-    splitDefinitionsIntoWords(terminology);
+const processInMemoryTerminologies = () =>
+  Promise.all(
+    terminologyVersions.map((terminology) => {
+      if (!mem[terminology.id]) return Promise.resolve();
+      if (!mem[terminology.id][terminology.version]) return Promise.resolve();
+      splitDefinitionsIntoWords(terminology);
 
-    const docs = createDocsForCodeCollection(terminology.id, terminology.version);
-    const docWithWords = createDocsForWordsCollection(terminology);
+      const docs = createDocsForCodeCollection(terminology.id, terminology.version);
+      const docWithWords = createDocsForWordsCollection(terminology);
 
-    logger.info(`${terminology.id}: Writing cached doc files...`);
+      logger.info(`${terminology.id}: Writing cached doc files...`);
 
-    await writeDocFiles(docs, join(CACHED_DIR, terminology.id, `${terminology.version}.json`));
-    logger.info(`${terminology.id}: First doc file written. Writing second...`);
-    await writeDocFiles(
-      docWithWords,
-      join(CACHED_DIR, terminology.id, `words_${terminology.version}.json`)
-    );
-    logger.info(`${terminology.id}: Both doc files written.`);
-    // await uploadToMongo(docs, docWithWords, terminology);
-  });
-};
+      return writeDocFiles(
+        docs,
+        join(CACHED_DIR, terminology.id, `${terminology.version}.json`)
+      ).then(() => {
+        logger.info(`${terminology.id}: First doc file written. Writing second...`);
+        return writeDocFiles(
+          docWithWords,
+          join(CACHED_DIR, terminology.id, `words_${terminology.version}.json`)
+        );
+      });
+    })
+  );
 
 // For a given dictionary file load it and map to an object - mem
 // Then determine the ancestors for each code and upload the resulting objects to mongo
-const processDictionaryFile = (terminology, version, directory, file) => {
-  logger.info(`${terminology}: ${file}: Loading...`);
-  if (!mem[terminology]) mem[terminology] = {};
-  if (!mem[terminology][version]) mem[terminology][version] = {};
+const processDictionaryFile = (terminology, version, directory, file) =>
+  new Promise((resolve) => {
+    logger.info(`${terminology}: ${file}: Loading...`);
+    if (!mem[terminology]) mem[terminology] = {};
+    if (!mem[terminology][version]) mem[terminology][version] = {};
 
-  // Ignore files that don't contain 'dict.txt'
-  if (file.indexOf('dict.txt') < 0) return;
+    // Ignore files that don't contain 'dict.txt'
+    if (file.indexOf('dict.txt') < 0) return;
 
-  todo += 1;
+    const inputStream = fs.createReadStream(join(directory, file));
 
-  const inputStream = fs.createReadStream(join(directory, file));
-
-  const onInputLine = (line) => {
-    const bits = line.split('\t');
-    if (mem[terminology][version][bits[0]]) {
-      if (mem[terminology][version][bits[0]].t.indexOf(bits[1]) < 0) {
-        mem[terminology][version][bits[0]].t.push(bits[1]);
+    const onInputLine = (line) => {
+      const bits = line.split('\t');
+      if (mem[terminology][version][bits[0]]) {
+        if (mem[terminology][version][bits[0]].t.indexOf(bits[1]) < 0) {
+          mem[terminology][version][bits[0]].t.push(bits[1]);
+        }
+        if (mem[terminology][version][bits[0]].p.indexOf(bits[2]) < 0) {
+          mem[terminology][version][bits[0]].p.push(bits[2]);
+        }
+      } else {
+        mem[terminology][version][bits[0]] = {
+          t: [bits[1]],
+          p: [bits[2]],
+        };
       }
-      if (mem[terminology][version][bits[0]].p.indexOf(bits[2]) < 0) {
-        mem[terminology][version][bits[0]].p.push(bits[2]);
-      }
-    } else {
-      mem[terminology][version][bits[0]] = {
-        t: [bits[1]],
-        p: [bits[2]],
-      };
-    }
-  };
+    };
 
-  const onInputEnd = () => {
-    done += 1;
-    logger.info(`${terminology}: ${file}: Read complete.`);
-    if (todo === done) {
-      logger.info(`${terminology}: All files read into memory.`);
-      processInMemoryTerminologies();
-    }
-  };
+    const onInputEnd = () => {
+      logger.info(`${terminology}: ${file}: Read complete.`);
+      resolve();
+      // if (todo === done) {
+      //   logger.info(`${terminology}: All files read into memory.`);
+      //   return resolve(3);
+      //   // return processInMemoryTerminologies().then(() => {
+      //   //   logger.info('My message debug 123');
+      //   //   resolve();
+      //   // });
+      // }
+    };
 
-  const rlInput = readline.createInterface({
-    input: inputStream,
+    const rlInput = readline.createInterface({
+      input: inputStream,
+    });
+    rlInput.on('line', onInputLine).on('close', onInputEnd);
   });
-  rlInput.on('line', onInputLine).on('close', onInputEnd);
-};
 
 // For a given terminology find all the data files and process them sequentially
-const processTerminology = function processTerminology(terminology) {
+const processTerminology = (terminology) => {
   logger.info(`${terminology.id}: Starting processing...`);
-  try {
-    const directory = join(TERMINOLOGY_DIR, terminology.id, 'data-processed', terminology.version);
-    fs.readdirSync(directory).forEach((file) => {
-      if (file.indexOf('swp') < 0)
-        processDictionaryFile(terminology.id, terminology.version, directory, file);
-    });
-  } catch (e) {
+  const directory = join(TERMINOLOGY_DIR, terminology.id, 'data-processed', terminology.version);
+  const proms = fs
+    .readdirSync(directory)
+    .map((file) =>
+      file.indexOf('swp') < 0
+        ? processDictionaryFile(terminology.id, terminology.version, directory, file)
+        : Promise.resolve()
+    );
+  return Promise.all(proms).catch(() => {
     logger.info(`${terminology.id}: No files found. Processing ends. `);
-  }
+  });
 };
 
 const loadCachedFile = (filepath) =>
   new Promise((resolve, reject) => {
-    const transformStream = JSONStream.parse('*');
-    const inputStream = fs.createReadStream(filepath);
-    const docs = [];
-
-    inputStream
-      .pipe(transformStream)
-      .on('data', (data) => {
-        docs.push(data);
-      })
-      .on('error', reject)
-      .on('end', () => {
-        resolve(docs);
-      });
+    fs.readFile(filepath, 'utf8', (err, data) => {
+      if (err) return reject(err);
+      const docs = JSON.parse(data);
+      resolve(docs);
+    });
   });
 
 const loadCachedFiles = async (terminology, version) => {
+  logger.info(`${terminology}: ${version}: Loading files from cache...`);
   const result = await Promise.all([
     loadCachedFile(join(CACHED_DIR, terminology, `${version}.json`)),
     loadCachedFile(join(CACHED_DIR, terminology, `words_${version}.json`)),
   ]);
+  logger.info(`${terminology}: ${version}: Files loaded into memory.`);
   return result;
 };
 
@@ -401,9 +412,8 @@ const connectToMongo = () =>
 const disconnectFromMongo = () => mongoose.disconnect();
 
 const createJSON = (tvs = terminologyVersions) => {
-  tvs.forEach((terminology) => {
-    processTerminology(terminology);
-  });
+  const proms = tvs.map(async (terminology) => processTerminology(terminology));
+  return Promise.all(proms).then(() => processInMemoryTerminologies());
 };
 
 const uploadJSON = async (tvs = cachedTerminologyVersions, shouldAddIndexes = true) => {
@@ -431,25 +441,45 @@ const main = async () => {
   switch (letsDo) {
     case optionNames.fromFormatToJSON: {
       const terminologiesToCreate = await whichTerminolgiesToProcess(terminologyVersions);
-      return createJSON(terminologiesToCreate);
+      await createJSON(terminologiesToCreate);
+      return main();
     }
     case optionNames.uploadAndIndex: {
       const terminologiesToUpload = await whichTerminologiesToUpload(cachedTerminologyVersions);
-      return uploadJSON(terminologiesToUpload, true);
+      await uploadJSON(terminologiesToUpload, true);
+      return main();
     }
     case optionNames.uploadJSON: {
       const terminologiesToUpload = await whichTerminologiesToUpload(cachedTerminologyVersions);
-      return uploadJSON(terminologiesToUpload, false);
+      await uploadJSON(terminologiesToUpload, false);
+      return main();
     }
     case optionNames.addIndexes: {
       const terminologiesToUpload = await whichTerminologiesToUpload(cachedTerminologyVersions);
-      return justAddIndexes(terminologiesToUpload);
+      await justAddIndexes(terminologiesToUpload);
+      return main();
     }
     case optionNames.fromRawToFormat: {
       const terminologyToProcess = await whichRawTerminologyToProcess();
-      return processRawTerminologies(terminologyToProcess);
+      await processRawTerminologies(terminologyToProcess);
+      return main();
     }
   }
 };
 
-main();
+// Catch any attempt to kill the process e.g. CTRL-C / CMD-C and
+// exit gracefully
+process.kill = () => {
+  process.stdout.write('\n\n');
+  logger.info('Exiting...');
+  logger.info('Thanks for using. Have a nice day!');
+  process.exit();
+};
+
+main()
+  .then(() => {
+    logger.info('all done');
+  })
+  .catch((e) => {
+    logger.erro(e);
+  });

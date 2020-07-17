@@ -71,13 +71,11 @@ const execute = async ({ exitProcessOnMissingData = true } = {}) => {
         choices,
       },
     ])
-    .then((answer) => {
-      if (answer.version === ALL) {
-        processVersions(snomedVersions, inputFileLocation);
-      } else {
-        processVersions([answer.version], inputFileLocation);
-      }
-    });
+    .then((answer) =>
+      answer.version === ALL
+        ? processVersions(snomedVersions, inputFileLocation)
+        : processVersions([answer.version], inputFileLocation)
+    );
 };
 
 module.exports = { execute };
