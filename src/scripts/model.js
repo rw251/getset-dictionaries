@@ -44,3 +44,20 @@ exports.Word = (terminologyName, version) => {
 
   return mongoose.model(`Word${terminologyName}${version}`, WordSchema);
 };
+
+/**
+ *
+ * @param {string} terminologyName
+ * @param {string} version
+ */
+exports.Tuple = (terminologyName, version, tuple) => {
+  const TupleSchema = new Schema(
+    {
+      _id: String, // The || separated words in the n-tuple
+      n: Number, // Frequency of the n-tuple
+    },
+    { autoIndex: false, collection: `tuples-${terminologyName}-${version}-${tuple}-tuple` }
+  );
+
+  return mongoose.model(`Tuple${terminologyName}${version}-${tuple}tuple`, TupleSchema);
+};
