@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node --max_old_space_size=4096 src/main.js"
+    "start": "node --max_old_space_size=8096 src/main.js"
   },
   "author": "Richard Williams",
   "license": "ISC",
