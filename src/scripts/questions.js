@@ -21,25 +21,36 @@ const findRawTerminologies = (directory = join(__dirname, '..', '..', 'terminolo
   return terminologies;
 };
 
-const getChoicesForVersions = (versions) =>
-  [{ name: 'All', value: ALL }, new inquirer.Separator()].concat(
-    versions.map((x) => `${x.id}${separator}${x.version}`)
-  );
+const getChoicesForVersions = (versions, includeAll = true) =>
+  includeAll
+    ? [{ name: 'All', value: ALL }, new inquirer.Separator()].concat(
+        versions.map((x) => `${x.id}${separator}${x.version}`)
+      )
+    : versions.map(
+        (x) =>
+          `${x.id}${separator}${x.version}${
+            x.tuple ? `${separator}${x.tuple}${separator}tuple` : ''
+          }`
+      );
 
-const whichTerminologiesToUpload = async (versions) => {
-  const choices = getChoicesForVersions(versions);
+const whichTerminologies = async (versions, verb = 'upload', includeAll = true) => {
+  const choices = getChoicesForVersions(versions, includeAll);
   return inquirer
     .prompt([
       {
         type: 'list',
         name: 'terminology',
-        message: 'Which cached terminology file do you want to upload?',
+        message: `Which cached terminology file do you want to ${verb}?`,
         choices,
       },
     ])
     .then((answer) => answer.terminology.split(separator))
-    .then(([id, version]) =>
-      id === ALL ? versions : versions.filter((x) => x.id === id && x.version === version)
+    .then(([id, version, tuple]) =>
+      id === ALL
+        ? versions
+        : versions.filter(
+            (x) => x.id === id && x.version === version && (!tuple || +x.tuple === +tuple)
+          )
     );
 };
 
@@ -60,12 +71,25 @@ const whichTerminolgiesToProcess = async (versions) => {
     );
 };
 
+const getNumber = () =>
+  inquirer
+    .prompt([
+      {
+        type: 'input',
+        message: 'Enter a number',
+        name: 'n',
+      },
+    ])
+    .then((answer) => +answer.n);
+
 const optionNames = {
   fromRawToFormat: 'fromRawToFormat',
   fromFormatToJSON: 'fromFormatToJSON',
   uploadJSON: 'uploadJSON',
   uploadAndIndex: 'uploadAndIndex',
   addIndexes: 'addIndexes',
+  createTuples: 'createTuples',
+  uploadTuples: 'uploadTuples',
 };
 const options = {
   fromRawToFormat:
@@ -74,6 +98,8 @@ const options = {
   uploadAndIndex: 'Upload JSON to mongo and add indexes',
   uploadJSON: "Upload JSON to mongo but don't add indexes",
   addIndexes: 'Add indexes to existing collection',
+  createTuples: 'Create tuples',
+  uploadTuples: 'Upload tuples',
 };
 
 const whatToDo = async () => {
@@ -108,8 +134,9 @@ const whichRawTerminologyToProcess = async () => {
 
 module.exports = {
   whichTerminolgiesToProcess,
-  whichTerminologiesToUpload,
+  whichTerminologies,
   whichRawTerminologyToProcess,
   whatToDo,
   optionNames,
+  getNumber,
 };

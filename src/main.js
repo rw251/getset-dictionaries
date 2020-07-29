@@ -3,22 +3,31 @@ const { join } = require('path');
 const parentLogger = require('./logger');
 const mongoose = require('mongoose');
 const readline = require('readline');
-const { Code, Word } = require('./model');
 const {
   whichTerminolgiesToProcess,
-  whichTerminologiesToUpload,
+  whichTerminologies,
   whichRawTerminologyToProcess,
   whatToDo,
   optionNames,
+  getNumber,
 } = require('./scripts/questions');
+const {
+  getTermVersFromProcessedData,
+  getTermVersFromCache,
+  getTuplesFromCache,
+} = require('./scripts/file');
 const { processRawTerminologies } = require('../terminologies/wrapper');
+const { createTuples, loadTupleFromCache } = require('./scripts/tuples');
+const replacements = require('./scripts/replacements');
+const { Tuple } = require('./scripts/model');
 require('dotenv').config();
 
 const CACHED_DIR = join(__dirname, '..', 'cache');
 const TERMINOLOGY_DIR = join(__dirname, '..', 'terminologies');
 
-const terminologyVersions = [];
-const cachedTerminologyVersions = [];
+const terminologyVersions = getTermVersFromProcessedData();
+const cachedTerminologyVersions = getTermVersFromCache();
+const cachedTuplifiedTerminologies = getTuplesFromCache();
 const mem = {};
 const GDone = {};
 const G = {};
@@ -26,58 +35,10 @@ let logger = parentLogger;
 
 mongoose.Promise = Promise;
 
-const getSubDirectories = (directory) =>
-  fs
-    .readdirSync(directory, { withFileTypes: true })
-    .filter((dirent) => dirent.isDirectory())
-    .map((dirent) => dirent.name);
-
-const getFiles = (directory) =>
-  fs
-    .readdirSync(directory, { withFileTypes: true })
-    .filter((dirent) => dirent.isFile())
-    .map((dirent) => dirent.name);
-
-const createOutputCacheDirIfNotExists = (terminology) => {
-  const dirPath = join(CACHED_DIR, terminology);
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath);
-  }
-};
-
-// Populate the terminology/version combos that exist in the data-processed dirs
-getSubDirectories(TERMINOLOGY_DIR).map((terminology) => {
-  createOutputCacheDirIfNotExists(terminology);
-  const versions = getSubDirectories(join(TERMINOLOGY_DIR, terminology, 'data-processed'));
-  versions.map((version) => {
-    terminologyVersions.push({
-      id: terminology,
-      version,
-    });
-  });
-});
-// Populate the cached terminology/version combos that exist in the cache directory
-getSubDirectories(CACHED_DIR).map((terminology) => {
-  const files = getFiles(join(CACHED_DIR, terminology));
-  const versionObject = {};
-  files.forEach((file) => {
-    const isWordFile = file.indexOf('words_') === 0;
-    const version = isWordFile ? file.substr(6, file.length - 11) : file.substr(0, file.length - 5);
-    if (!versionObject[version]) {
-      versionObject[version] = { hasWordFile: isWordFile, hasOtherFile: !isWordFile };
-    } else if (
-      (isWordFile && versionObject[version].hasOtherFile) ||
-      (!isWordFile && versionObject[version].hasWordFile)
-    ) {
-      cachedTerminologyVersions.push({
-        id: terminology,
-        version,
-        codeCollection: Code(terminology, version),
-        wordCollection: Word(terminology, version),
-      });
-    }
-  });
-});
+const filterOutReplacements = (wordList) =>
+  wordList.filter(
+    (x) => !replacements[x] || replacements[x].filter((y) => wordList.indexOf(y) > -1).length === 0
+  );
 
 // Determines if the code is the root code for that terminology
 const isRoot = function isRoot(code, terminology) {
@@ -210,6 +171,11 @@ const splitDefinitionsIntoWords = (terminology) => {
     mem[terminology.id][terminology.version][v].t.forEach((vv) => {
       if (vv) {
         vv.toLowerCase() // make case consistent
+          .replace(/\[/g, ' [') // add extra space before and after parentheses
+          .replace(/\]/g, '] ') // add extra space before and after parentheses
+          .replace(/\(/g, ' (') // add extra space before and after parentheses
+          .replace(/\)/g, ') ') // add extra space before and after parentheses
+          .replace(/,([^ 0-9])/g, ', $1') // add space after commas UNLESS it's followed by a number e.g. 1,000
           .split(' ') // separate into "words" by splitting on spaces
           .forEach((word) => {
             // trim any non-alphanumeric characters from the word
@@ -240,7 +206,7 @@ const splitDefinitionsIntoWords = (terminology) => {
       if (!wordCounter[w]) wordCounter[w] = 1;
       else wordCounter[w] += 1;
     });
-    mem[terminology.id][terminology.version][v].w = Object.keys(nword);
+    mem[terminology.id][terminology.version][v].w = filterOutReplacements(Object.keys(nword));
   });
   if (terminology.wordCount) {
     logger.error('should only hit this once per terminology');
@@ -435,6 +401,39 @@ const justAddIndexes = async (tvs = cachedTerminologyVersions) => {
   await disconnectFromMongo();
 };
 
+const dropTupleCollection = async (collection) => {
+  logger.info(`Dropping ${collection.modelName} if it exists...`);
+  try {
+    const collectionInfo = await collection.db.db
+      .listCollections({ name: collection.collection.name })
+      .next();
+    if (collectionInfo) {
+      // collection exists so we drop
+      await collection.collection.drop();
+      logger.info(`Collection ${collection.modelName} removed.`);
+    } else {
+      logger.info(`Collection ${collection.modelName} does not exist so don't need to remove.`);
+    }
+  } catch (err) {
+    logger.error(err);
+    logger.info(`Error dropping collection ${collection.modelName}`);
+    process.exit(1);
+  }
+};
+
+const uploadTuple = async (collection, docs) => {
+  logger.info(`Inserting tuple documents for ${collection.modelName}...`);
+  try {
+    const operations = docs.map((doc) => ({ insertOne: { document: doc } }));
+    await collection.collection.bulkWrite(operations, { ordered: false });
+    logger.info(`All tuple documents inserted for ${collection.modelName}.`);
+  } catch (errInsert) {
+    logger.info(`Tuple documents failed to insert for ${collection.modelName}.`);
+    logger.error(errInsert);
+    process.exit(1);
+  }
+};
+
 const main = async () => {
   const letsDo = await whatToDo();
   console.log(letsDo);
@@ -445,23 +444,48 @@ const main = async () => {
       return main();
     }
     case optionNames.uploadAndIndex: {
-      const terminologiesToUpload = await whichTerminologiesToUpload(cachedTerminologyVersions);
+      const terminologiesToUpload = await whichTerminologies(cachedTerminologyVersions);
       await uploadJSON(terminologiesToUpload, true);
       return main();
     }
     case optionNames.uploadJSON: {
-      const terminologiesToUpload = await whichTerminologiesToUpload(cachedTerminologyVersions);
+      const terminologiesToUpload = await whichTerminologies(cachedTerminologyVersions);
       await uploadJSON(terminologiesToUpload, false);
       return main();
     }
     case optionNames.addIndexes: {
-      const terminologiesToUpload = await whichTerminologiesToUpload(cachedTerminologyVersions);
+      const terminologiesToUpload = await whichTerminologies(cachedTerminologyVersions);
       await justAddIndexes(terminologiesToUpload);
       return main();
     }
     case optionNames.fromRawToFormat: {
       const terminologyToProcess = await whichRawTerminologyToProcess();
       await processRawTerminologies(terminologyToProcess);
+      return main();
+    }
+    case optionNames.createTuples: {
+      const terminolgyToTuplify = await whichTerminologies(
+        cachedTerminologyVersions,
+        'tuplify',
+        false
+      );
+      const n = await getNumber();
+      await createTuples(n, terminolgyToTuplify[0]);
+      return main();
+    }
+    case optionNames.uploadTuples: {
+      const selection = await whichTerminologies(
+        cachedTuplifiedTerminologies,
+        'upload the tuplified version',
+        false
+      );
+      const { id, version, tuple } = selection[0];
+      const cachedData = loadTupleFromCache({ id, version, tuple });
+      await connectToMongo();
+      const tupleCollection = Tuple(id, version, tuple);
+      await dropTupleCollection(tupleCollection);
+      await uploadTuple(tupleCollection, cachedData);
+      await disconnectFromMongo();
       return main();
     }
   }
@@ -481,5 +505,5 @@ main()
     logger.info('all done');
   })
   .catch((e) => {
-    logger.erro(e);
+    logger.error(e);
   });
