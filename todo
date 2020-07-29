@@ -1,0 +1,16 @@
+- Define algorithm for tuple matching. Something like
+  1. Take existing code set and get a list of all the code definitions
+    "Essential hypertension", "Primary hypertension", "Malignant essential hypertension", "Systolic hypertension"
+  2. Find all sets of 1,2,3 and 4 words from the definitions, sorted alphabetically
+    1-tuples: "essential", "hypertension", "malignant", "primary", "systolic"
+    2-tuples: "essential||hypertension", "hypertension||primary", "hypertension||malignant", "essential||malignant", "hypertension||systolic"
+    3-tuples: "essential||hypertension||malignant"
+  3. For each one find the number of times it appears in the code set (C) and the number of times it appears in the dictionary (D) via the tuple mongo collections
+    TUPLE - C - D
+    ===== - = - =
+    "essential" - 2 - 25
+    "hypertension" - 4 - 161
+    "essential||hypertension" - 2 - 11
+  4. If there are any terms where the tuple only appears in the code set (e.g. C===D) then add the one with highest C to the inclusion terms.
+  5. Remove the matching terms from the code set and repeat steps 1-4 until there are no terms where C===D, then go to 6
+  6. We're going to need exclusion terms. Something like the same as inclusion but for exclusion terms e.g. pick tuple which maximises the correct codes vs incorrect codes that get added to the set. Then work out how many exclusion terms would be needed
