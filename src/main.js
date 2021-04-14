@@ -17,7 +17,7 @@ const {
   getTuplesFromCache,
 } = require('./scripts/file');
 const { processRawTerminologies } = require('../terminologies/wrapper');
-const { createTuples, loadTupleFromCache } = require('./scripts/tuples');
+const { createTuples, getTupleStreamFromCache } = require('./scripts/tuples');
 const replacements = require('./scripts/replacements');
 const { Tuple } = require('./scripts/model');
 require('dotenv').config();
@@ -44,6 +44,7 @@ const filterOutReplacements = (wordList) =>
 const isRoot = function isRoot(code, terminology) {
   if (terminology === 'Readv2' && code === '.....00') return true;
   else if (terminology === 'EMIS' && code === '.....') return true;
+  else if (terminology === 'CTV3' && code === '.....') return true;
   else if (terminology === 'SNOMED CT' && code === '?') return true;
   else if (!code) return true;
   return false;
@@ -370,7 +371,7 @@ const loadCachedFiles = async (terminology, version) => {
 
 const connectToMongo = () =>
   mongoose.connect(process.env.GETSET_MONGO_URL, {
-    socketOptions: { socketTimeoutMS: 0 },
+    socketTimeoutMS: 0,
     useNewUrlParser: true,
     useUnifiedTopology: true,
   });
@@ -434,6 +435,35 @@ const uploadTuple = async (collection, docs) => {
   }
 };
 
+const applyOperations = async (collection, operations) => {
+  logger.info(`Inserting tuple documents for ${collection.modelName}...`);
+  try {
+    await collection.collection.bulkWrite(operations, { ordered: false });
+    logger.info(`All tuple documents inserted for ${collection.modelName}.`);
+  } catch (errInsert) {
+    logger.info(`Tuple documents failed to insert for ${collection.modelName}.`);
+    logger.error(errInsert);
+    process.exit(1);
+  }
+};
+
+const getTupleOperations = (tupleStream) =>
+  new Promise((resolve) => {
+    logger.info(`Constructing tuple insert operations...`);
+    const readline = require('readline');
+    const rl = readline.createInterface({
+      input: tupleStream,
+    });
+    const operations = [];
+    rl.on('line', (line) => {
+      operations.push({ insertOne: { document: JSON.parse(line) } });
+    });
+    rl.on('close', () => {
+      logger.info(`Finished constructing ${operations.length} insert operations.`);
+      resolve(operations);
+    });
+  });
+
 const main = async () => {
   const letsDo = await whatToDo();
   console.log(letsDo);
@@ -480,12 +510,20 @@ const main = async () => {
         false
       );
       const { id, version, tuple } = selection[0];
-      const cachedData = loadTupleFromCache({ id, version, tuple });
+
+      const tupleStream = getTupleStreamFromCache({ id, version, tuple });
+      const operations = await getTupleOperations(tupleStream);
       await connectToMongo();
       const tupleCollection = Tuple(id, version, tuple);
       await dropTupleCollection(tupleCollection);
-      await uploadTuple(tupleCollection, cachedData);
+      await applyOperations(tupleCollection, operations);
       await disconnectFromMongo();
+      // const cachedData = loadTupleFromCache({ id, version, tuple });
+      // await connectToMongo();
+      // const tupleCollection = Tuple(id, version, tuple);
+      // await dropTupleCollection(tupleCollection);
+      // await uploadTuple(tupleCollection, cachedData);
+      // await disconnectFromMongo();
       return main();
     }
   }
